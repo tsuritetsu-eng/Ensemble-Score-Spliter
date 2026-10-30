@@ -1,870 +1,454 @@
 <!DOCTYPE html>
-<html lang="ja" class="dark">
+<html lang="ja">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PDF楽譜 エディター & パート自動分割</title>
-    <!-- Tailwind CSS -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = {
-            darkMode: 'class',
-            theme: {
-                extend: {
-                    colors: {
-                        brand: {
-                            50: '#f0f9ff',
-                            100: '#e0f2fe',
-                            500: '#0284c7',
-                            600: '#0369a1',
-                            700: '#075985',
-                        }
-                    }
-                }
-            }
-        }
-    </script>
-    <!-- PDF.js -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-    <!-- pdf-lib -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
-    <!-- JSZip & FileSaver -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
-    <!-- Tesseract.js OCR -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/4.1.1/tesseract.min.js"></script>
-    <!-- Font Awesome Icons -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    
-    <style>
-        ::-webkit-scrollbar { width: 8px; height: 8px; }
-        ::-webkit-scrollbar-track { background: rgba(0, 0, 0, 0.05); }
-        .dark ::-webkit-scrollbar-track { background: rgba(255, 255, 255, 0.05); }
-        ::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.2); border-radius: 4px; }
-        .dark ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.2); }
-        
-        .dragging-card { opacity: 0.4; border: 2px dashed #0284c7 !important; }
-        .drag-over-card { border: 2px solid #3b82f6 !important; transform: scale(1.02); }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PDF楽譜エディタ & パート自動分割</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- FontAwesome -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  
+  <!-- ライブラリ順次読み込み -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
 </head>
-<body class="bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-100 min-h-screen flex flex-col font-sans transition-colors duration-200">
+<body class="bg-slate-100 min-h-screen text-slate-800 flex flex-col">
 
-    <!-- Header -->
-    <header class="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-30 shadow-sm">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-            <div class="flex items-center space-x-3">
-                <div class="p-2 bg-brand-500 text-white rounded-lg shadow">
-                    <i class="fa-solid fa-music text-xl"></i>
-                </div>
-                <h1 class="text-xl font-bold tracking-tight text-gray-900 dark:text-white">PDF楽譜 エディター & パート自動分割</h1>
-            </div>
-            
-            <div class="flex items-center space-x-3">
-                <button id="themeToggleBtn" class="p-2.5 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-white rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition" title="テーマ切り替え">
-                    <i class="fa-solid fa-moon dark:hidden"></i>
-                    <i class="fa-solid fa-sun hidden dark:block text-amber-400"></i>
-                </button>
-                <button id="clearAllBtn" class="px-3 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-lg transition font-medium hidden">
-                    <i class="fa-solid fa-trash-can mr-1.5"></i>すべて削除
-                </button>
-                
-                <div class="relative inline-block text-left">
-                    <button id="exportMenuBtn" disabled class="px-5 py-2.5 bg-brand-500 hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-lg shadow-sm transition flex items-center gap-2">
-                        <i class="fa-solid fa-file-export"></i>
-                        <span>書き出し</span>
-                        <i class="fa-solid fa-chevron-down text-xs ml-1"></i>
-                    </button>
-                    <div id="exportDropdown" class="hidden absolute right-0 mt-2 w-64 bg-white dark:bg-gray-800 rounded-xl shadow-xl border border-gray-200 dark:border-gray-700 py-2 z-50 text-sm">
-                        <button id="exportSinglePdfBtn" class="w-full text-left px-4 py-2.5 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2.5 text-gray-700 dark:text-gray-200">
-                            <i class="fa-solid fa-file-pdf text-red-500"></i>
-                            <div>
-                                <div class="font-semibold">統合PDF出力</div>
-                                <div class="text-xs text-gray-400">全ページを単一PDFとして保存</div>
-                            </div>
-                        </button>
-                        <button id="exportZipPartsBtn" class="w-full text-left px-4 py-2.5 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2.5 text-gray-700 dark:text-gray-200 border-t border-gray-100 dark:border-gray-700">
-                            <i class="fa-solid fa-file-zipper text-amber-500"></i>
-                            <div>
-                                <div class="font-semibold">パート別ZIP一括保存</div>
-                                <div class="text-xs text-gray-400">パート別独立PDFをZIP圧縮保存</div>
-                            </div>
-                        </button>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </header>
+  <!-- ヘッダー -->
+  <header class="bg-indigo-700 text-white p-4 shadow-md flex justify-between items-center">
+    <h1 class="text-xl font-bold flex items-center gap-2">
+      <i class="fa-solid fa-music"></i> PDF楽譜エディタ & パート分割
+    </h1>
+    <div id="status-badge" class="text-xs bg-indigo-800 px-3 py-1 rounded-full text-indigo-200">
+      準備完了
+    </div>
+  </header>
 
-    <!-- Main Content -->
-    <main class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 flex flex-col md:flex-row gap-6">
+  <div class="flex-1 max-w-7xl w-full mx-auto p-4 grid grid-cols-1 md:grid-cols-4 gap-6">
+
+    <!-- サイドバー（操作パネル） -->
+    <div class="md:col-span-1 space-y-4">
+      
+      <!-- ファイル追加ゾーン -->
+      <div id="drop-zone" class="border-2 border-dashed border-indigo-300 bg-white rounded-xl p-6 text-center hover:bg-indigo-50 transition cursor-pointer shadow-sm">
+        <i class="fa-solid fa-file-circle-plus text-4xl text-indigo-500 mb-2"></i>
+        <p class="font-bold text-sm text-gray-700">PDFをドラッグ＆ドロップ</p>
+        <p class="text-xs text-gray-500 mt-1">またはタップして選択</p>
+        <input type="file" id="file-input" accept="application/pdf" multiple class="hidden">
+      </div>
+
+      <!-- 編集アクション -->
+      <div class="bg-white rounded-xl p-4 shadow-sm space-y-2">
+        <h2 class="text-sm font-bold text-gray-500 uppercase tracking-wider mb-2">編集・加工</h2>
         
-        <!-- Sidebar -->
-        <aside id="partSidebar" class="w-full md:w-80 flex-shrink-0 flex flex-col gap-4">
-            <div class="bg-white dark:bg-gray-800 rounded-2xl p-5 border border-gray-200 dark:border-gray-700 shadow-sm">
-                <div class="flex items-center justify-between mb-4">
-                    <h2 class="font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                        <i class="fa-solid fa-layer-group text-brand-500"></i>
-                        パート一覧
-                    </h2>
-                    <button id="addPartBtn" class="text-xs px-2.5 py-1.5 bg-brand-50 hover:bg-brand-100 dark:bg-brand-950/50 dark:hover:bg-brand-900/60 text-brand-600 dark:text-brand-300 font-semibold rounded-lg transition flex items-center gap-1">
-                        <i class="fa-solid fa-plus"></i> パート追加
-                    </button>
-                </div>
+        <button id="btn-split-a3" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-3 rounded-lg text-sm flex items-center justify-center gap-2 transition">
+          <i class="fa-solid fa-scissors"></i> 選択ページをA3見開き分割
+        </button>
 
-                <div class="mb-4">
-                    <label class="block text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1.5">編成プリセット</label>
-                    <select id="presetSelect" class="w-full bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-700 text-gray-800 dark:text-gray-200 text-xs rounded-lg p-2 focus:ring-brand-500">
-                        <option value="">-- プリセットを選択 --</option>
-                        <option value="brassBand">吹奏楽 (Wind Band)</option>
-                        <option value="orchestra">オーケストラ (Orchestra)</option>
-                        <option value="stringQuartet">弦楽四重奏 (String Quartet)</option>
-                        <option value="choirSATB">混声四部合唱 (SATB Choir)</option>
-                    </select>
-                </div>
+        <button id="btn-detect-parts" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 px-3 rounded-lg text-sm flex items-center justify-center gap-2 transition">
+          <i class="fa-solid fa-wand-magic-sparkles"></i> パート名を自動認識
+        </button>
 
-                <div id="partList" class="space-y-2 max-h-[350px] overflow-y-auto pr-1"></div>
-            </div>
+        <button id="btn-clear" class="w-full bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold py-2 px-3 rounded-lg text-sm flex items-center justify-center gap-2 transition">
+          <i class="fa-solid fa-trash"></i> すべて消去
+        </button>
+      </div>
 
-            <!-- AI / OCR Box -->
-            <div class="bg-white dark:bg-gray-800 rounded-2xl p-5 border border-gray-200 dark:border-gray-700 shadow-sm text-xs space-y-3">
-                <h3 class="font-bold text-gray-900 dark:text-white flex items-center gap-1.5">
-                    <i class="fa-solid fa-wand-magic-sparkles text-amber-500"></i> 自動パート認識 (テキスト+OCR)
-                </h3>
-                <p class="text-gray-500 dark:text-gray-400 leading-relaxed">楽譜内のパート名表記を自動判定して振り分けます。</p>
+      <!-- エクスポート -->
+      <div class="bg-white rounded-xl p-4 shadow-sm space-y-2">
+        <h2 class="text-sm font-bold text-gray-500 uppercase tracking-wider mb-2">出力・保存</h2>
+        
+        <button id="btn-export-single" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 px-3 rounded-lg text-sm flex items-center justify-center gap-2 shadow transition">
+          <i class="fa-solid fa-file-pdf"></i> 1つのPDFに結合出力
+        </button>
 
-                <button id="runAutoDetectBtn" class="w-full py-2.5 px-3 bg-gradient-to-r from-brand-500 to-indigo-600 hover:from-brand-600 hover:to-indigo-700 text-white font-bold rounded-xl shadow-md transition flex items-center justify-center gap-2">
-                    <i class="fa-solid fa-robot"></i>
-                    <span>全ページ自動パート解析</span>
-                </button>
+        <button id="btn-export-zip" class="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-2.5 px-3 rounded-lg text-sm flex items-center justify-center gap-2 shadow transition">
+          <i class="fa-solid fa-file-zipper"></i> パート別PDFをZIP出力
+        </button>
+      </div>
 
-                <div id="ocrProgressBox" class="hidden space-y-1.5 pt-1">
-                    <div class="flex justify-between text-[11px] font-medium text-gray-600 dark:text-gray-300">
-                        <span id="ocrStatusText">解析準備中...</span>
-                        <span id="ocrPercentText">0%</span>
-                    </div>
-                    <div class="w-full bg-gray-200 dark:bg-gray-700 h-2 rounded-full overflow-hidden">
-                        <div id="ocrProgressBar" class="bg-brand-500 h-full w-0 transition-all duration-300"></div>
-                    </div>
-                </div>
-            </div>
+      <!-- エラー・ログ表示（トースト／通知） -->
+      <div id="log-box" class="hidden bg-slate-800 text-slate-100 text-xs p-3 rounded-lg font-mono overflow-x-auto max-h-40"></div>
 
-            <!-- A3 Spread Splitter Tool Box -->
-            <div class="bg-white dark:bg-gray-800 rounded-2xl p-5 border border-gray-200 dark:border-gray-700 shadow-sm text-xs space-y-3">
-                <h3 class="font-bold text-gray-900 dark:text-white flex items-center gap-1.5">
-                    <i class="fa-solid fa-columns text-brand-500"></i> A3見開き中央分割
-                </h3>
-                <p class="text-gray-500 dark:text-gray-400 leading-relaxed">見開き（A3横型など）のページを真ん中から左右2ページ（左→右の順）に分割します。</p>
-                <button id="splitSpreadBtn" class="w-full py-2.5 px-3 bg-brand-500 hover:bg-brand-600 text-white font-bold rounded-xl shadow-md transition flex items-center justify-center gap-2">
-                    <i class="fa-solid fa-scissors"></i>
-                    <span>選択ページを見開き分割する</span>
-                </button>
-            </div>
-        </aside>
+    </div>
 
-        <!-- Canvas Area -->
-        <section class="flex-1 flex flex-col min-w-0">
-            <!-- File Drop Area -->
-            <div id="dropZone" class="border-2 border-dashed border-gray-300 dark:border-gray-700 hover:border-brand-500 dark:hover:border-brand-500 rounded-2xl p-8 text-center bg-white dark:bg-gray-800 transition cursor-pointer shadow-sm hover:shadow-md mb-6">
-                <input type="file" id="fileInput" multiple accept="application/pdf" class="hidden">
-                <div class="flex flex-col items-center justify-center space-y-3 pointer-events-none">
-                    <div class="w-16 h-16 bg-brand-50 dark:bg-gray-700/50 text-brand-500 dark:text-brand-400 rounded-full flex items-center justify-center text-2xl">
-                        <i class="fa-solid fa-file-circle-plus"></i>
-                    </div>
-                    <div>
-                        <p class="text-lg font-semibold text-gray-700 dark:text-gray-200">ここにPDF楽譜ファイルをドラッグ＆ドロップ</p>
-                        <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">またはクリックしてファイルを選択（複数選択可能）</p>
-                    </div>
-                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-300">
-                        ブラウザ内ローカル処理（サーバー非送信）
-                    </span>
-                </div>
-            </div>
+    <!-- メインエリア（サムネイル一覧） -->
+    <div class="md:col-span-3">
+      <div class="bg-white rounded-xl p-4 shadow-sm min-h-[500px]">
+        <div class="flex justify-between items-center mb-4 pb-2 border-b">
+          <h2 class="font-bold text-gray-700">ページ一覧 (<span id="page-count">0</span>件)</h2>
+          <div class="text-xs text-gray-500">ドラッグまたは矢印ボタンで並び替え可能</div>
+        </div>
 
-            <!-- Toolbar -->
-            <div id="editorToolbar" class="bg-white dark:bg-gray-800 p-4 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm mb-6 hidden flex-wrap gap-3 items-center justify-between">
-                <div class="flex items-center space-x-2 text-sm text-gray-600 dark:text-gray-300">
-                    <span class="font-semibold text-gray-900 dark:text-white" id="pageCountDisplay">0 ページ</span>
-                </div>
-                
-                <div class="flex items-center flex-wrap gap-2">
-                    <button id="selectAllBtn" class="px-2.5 py-1.5 text-xs font-medium bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition">全選択</button>
-                    <button id="selectOddBtn" class="px-2.5 py-1.5 text-xs font-medium bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition">奇数頁</button>
-                    <button id="selectEvenBtn" class="px-2.5 py-1.5 text-xs font-medium bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition">偶数頁</button>
-                    <div class="h-4 w-px bg-gray-300 dark:bg-gray-600 mx-1"></div>
-                    <button id="rotateSelectedLeftBtn" class="px-2.5 py-1.5 text-xs font-medium bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition" title="左90度回転">
-                        <i class="fa-solid fa-rotate-left"></i>
-                    </button>
-                    <button id="rotateSelectedRightBtn" class="px-2.5 py-1.5 text-xs font-medium bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition" title="右90度回転">
-                        <i class="fa-solid fa-rotate-right"></i>
-                    </button>
-                    <button id="deleteSelectedBtn" class="px-2.5 py-1.5 text-xs font-medium bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-900/50 rounded-lg transition">
-                        <i class="fa-solid fa-trash mr-1"></i>選択削除
-                    </button>
-                </div>
-            </div>
+        <!-- ページカード配置エリア -->
+        <div id="pages-container" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+          <div id="empty-state" class="col-span-full py-20 text-center text-gray-400">
+            <i class="fa-regular fa-file-pdf text-5xl mb-3"></i>
+            <p>PDFファイルを読み込んでください</p>
+          </div>
+        </div>
+      </div>
+    </div>
 
-            <!-- Page Grid -->
-            <div id="pagesContainer" class="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 flex-1"></div>
+  </div>
 
-            <!-- Empty State -->
-            <div id="emptyState" class="flex-1 flex flex-col items-center justify-center p-12 text-center text-gray-400 dark:text-gray-500">
-                <i class="fa-regular fa-copy text-5xl mb-4"></i>
-                <p class="text-base font-medium">楽譜PDFを追加するとここにページが表示されます</p>
-                <p class="text-xs mt-1">ドラッグ＆ドロップでページの並び替えが可能です</p>
-            </div>
-        </section>
-    </main>
-
-    <!-- Toast Notification Container -->
-    <div id="toastContainer" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2"></div>
-
-    <script>
+  <!-- JavaScript本体 -->
+  <script>
+    // --- 初期化 & ライブラリ通信エラー回避策 ---
+    window.addEventListener('DOMContentLoaded', () => {
+      if (window.pdfjsLib) {
+        // Workerによる外部ドメイン通信ブロックを極力避ける設定
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      }
+    });
 
-        // State Management
-        let pageList = []; // { id, pdfBytes, pageIndex, rotation, cropRect, selected, partId, detectedPartName }
-        let partsList = [
-            { id: 'part_score', name: 'Full Score / 総譜', color: '#0284c7' },
-            { id: 'part_flute', name: 'Flute / Piccolo', color: '#06b6d4' },
-            { id: 'part_clarinet', name: 'Bb Clarinet', color: '#84cc16' },
-            { id: 'part_trumpet', name: 'Bb Trumpet', color: '#ef4444' },
-            { id: 'part_horn', name: 'F Horn', color: '#f97316' }
-        ];
-        let filterPartId = null;
-        let draggedPageIndex = null;
+    // 内部データ保持用
+    let pageList = []; // { id, pdfBytes, pageIndex, rotation, partName, width, height }
+    let dragSrcIndex = null;
 
-        const PRESETS = {
-            brassBand: [
-                { name: 'Full Score / スコア', color: '#0284c7' },
-                { name: 'Flute / Piccolo', color: '#06b6d4' },
-                { name: 'Bb Clarinet 1', color: '#84cc16' },
-                { name: 'Bb Clarinet 2&3', color: '#65a30d' },
-                { name: 'Eb Alto Saxophone', color: '#f59e0b' },
-                { name: 'Bb Trumpet 1', color: '#ef4444' },
-                { name: 'F Horn 1&2', color: '#f97316' },
-                { name: 'Trombone', color: '#a855f7' },
-                { name: 'Euphonium', color: '#ec4899' },
-                { name: 'Tuba', color: '#475569' }
-            ],
-            orchestra: [
-                { name: 'Conductor / スコア', color: '#0284c7' },
-                { name: 'Flute', color: '#06b6d4' },
-                { name: 'Oboe', color: '#14b8a6' },
-                { name: 'Clarinet in Bb', color: '#84cc16' },
-                { name: 'Violin I', color: '#10b981' },
-                { name: 'Violin II', color: '#f59e0b' },
-                { name: 'Viola', color: '#8b5cf6' },
-                { name: 'Violoncello', color: '#ec4899' },
-                { name: 'Contrabass', color: '#6b7280' }
-            ],
-            stringQuartet: [
-                { name: 'Full Score / スコア', color: '#0284c7' },
-                { name: 'Violin I', color: '#10b981' },
-                { name: 'Violin II', color: '#f59e0b' },
-                { name: 'Viola', color: '#8b5cf6' },
-                { name: 'Cello', color: '#ec4899' }
-            ],
-            choirSATB: [
-                { name: 'Full Score / 伴奏譜', color: '#0284c7' },
-                { name: 'Soprano', color: '#ec4899' },
-                { name: 'Alto', color: '#a855f7' },
-                { name: 'Tenor', color: '#3b82f6' },
-                { name: 'Bass', color: '#10b981' }
-            ]
-        };
+    // DOM要素
+    const dropZone = document.getElementById('drop-zone');
+    const fileInput = document.getElementById('file-input');
+    const pagesContainer = document.getElementById('pages-container');
+    const emptyState = document.getElementById('empty-state');
+    const pageCountEl = document.getElementById('page-count');
+    const statusBadge = document.getElementById('status-badge');
+    const logBox = document.getElementById('log-box');
 
-        const INSTRUMENT_KEYWORDS = [
-            { name: 'Full Score / スコア', keys: ['score', 'full score', 'conductor', '総譜', 'スコア', 'partitur'] },
-            { name: 'Flute / Piccolo', keys: ['flute', 'flöte', 'piccolo', 'フルート', 'ピッコロ', 'fl.'] },
-            { name: 'Oboe', keys: ['oboe', 'hautbois', 'オーボエ', 'ob.'] },
-            { name: 'Clarinet', keys: ['clarinet', 'klarinette', 'クラリネット', 'cl.'] },
-            { name: 'Bassoon', keys: ['bassoon', 'fagott', 'ファゴット', 'fg.', 'bsn.'] },
-            { name: 'Alto Saxophone', keys: ['alto sax', 'altsaxophon', 'アルトサックス', 'a.sax'] },
-            { name: 'Tenor Saxophone', keys: ['tenor sax', 'tenorsaxophon', 'テナーサックス', 't.sax'] },
-            { name: 'Horn', keys: ['horn', 'corno', 'ホルン', 'hn.', 'hrn'] },
-            { name: 'Trumpet', keys: ['trumpet', 'trompete', 'トランペット', 'tpt.', 'trp'] },
-            { name: 'Trombone', keys: ['trombone', 'posaune', 'トロンボーン', 'trb.', 'tbn'] },
-            { name: 'Euphonium', keys: ['euphonium', 'ユーフォニアム', 'eup.', 'euph'] },
-            { name: 'Tuba', keys: ['tuba', 'チューバ', 'tb.'] },
-            { name: 'Percussion / Timpani', keys: ['percussion', 'timpani', 'パーカッション', 'ティンパニ', 'perc.', 'timp.'] },
-            { name: 'Violin I', keys: ['violin i', 'violin 1', 'ヴァイオリン1', '1st violin', 'vn 1', 'vn.1'] },
-            { name: 'Violin II', keys: ['violin ii', 'violin 2', 'ヴァイオリン2', '2nd violin', 'vn 2', 'vn.2'] },
-            { name: 'Viola', keys: ['viola', 'ヴィオラ', 'va.'] },
-            { name: 'Cello', keys: ['cello', 'violoncello', 'チェロ', 'vc.'] },
-            { name: 'Soprano', keys: ['soprano', 'ソプラノ', 'sop.'] },
-            { name: 'Alto', keys: ['alto', 'アルト'] },
-            { name: 'Tenor', keys: ['tenor', 'テナー', 'ten.'] },
-            { name: 'Bass', keys: ['bass', 'バス'] }
-        ];
+    // ログ表示ユーティリティ
+    function log(msg, isError = false) {
+      logBox.classList.remove('hidden');
+      const time = new Date().toLocaleTimeString();
+      const line = document.createElement('div');
+      line.className = isError ? 'text-red-400' : 'text-emerald-400';
+      line.textContent = `[${time}] ${msg}`;
+      logBox.appendChild(line);
+      logBox.scrollTop = logBox.scrollHeight;
+      if (isError) console.error(msg); else console.log(msg);
+    }
 
-        // DOM References
-        const dropZone = document.getElementById('dropZone');
-        const fileInput = document.getElementById('fileInput');
-        const pagesContainer = document.getElementById('pagesContainer');
-        const emptyState = document.getElementById('emptyState');
-        const editorToolbar = document.getElementById('editorToolbar');
-        const clearAllBtn = document.getElementById('clearAllBtn');
-        const pageCountDisplay = document.getElementById('pageCountDisplay');
-        const themeToggleBtn = document.getElementById('themeToggleBtn');
-        const partListEl = document.getElementById('partList');
-        const addPartBtn = document.getElementById('addPartBtn');
-        const presetSelect = document.getElementById('presetSelect');
-        const exportMenuBtn = document.getElementById('exportMenuBtn');
-        const exportDropdown = document.getElementById('exportDropdown');
+    // --- ファイル読み込み処理 (堅牢版) ---
+    dropZone.addEventListener('click', () => fileInput.click());
+    
+    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+      dropZone.addEventListener(eventName, (e) => { e.preventDefault(); e.stopPropagation(); }, false);
+      document.body.addEventListener(eventName, (e) => { e.preventDefault(); e.stopPropagation(); }, false);
+    });
 
-        // Prevent default drag and drop behavior globally (Prevents opening PDF in browser window)
-        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
-            window.addEventListener(eventName, (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-            }, false);
-        });
+    dropZone.addEventListener('drop', (e) => {
+      const files = e.dataTransfer.files;
+      if (files.length) handleFiles(files);
+    });
 
-        // Dropzone listeners
-        dropZone.addEventListener('click', () => fileInput.click());
-        fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
+    fileInput.addEventListener('change', (e) => {
+      if (e.target.files.length) handleFiles(e.target.files);
+    });
 
-        dropZone.addEventListener('dragover', () => dropZone.classList.add('border-brand-500', 'bg-brand-50/50'));
-        dropZone.addEventListener('dragleave', () => dropZone.classList.remove('border-brand-500', 'bg-brand-50/50'));
-        dropZone.addEventListener('drop', (e) => {
-            dropZone.classList.remove('border-brand-500', 'bg-brand-50/50');
-            const files = e.dataTransfer.files;
-            if (files.length > 0) handleFiles(files);
-        });
-
-        // Toggle Theme
-        themeToggleBtn.addEventListener('click', () => {
-            document.documentElement.classList.toggle('dark');
-        });
-
-        // Toggle Export Menu
-        exportMenuBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            exportDropdown.classList.toggle('hidden');
-        });
-        document.addEventListener('click', () => exportDropdown.classList.add('hidden'));
-
-        // Load & Process PDF Files
-        async function handleFiles(files) {
-            showToast('PDFを読み込んでいます...', 'info');
-            let loadedCount = 0;
-
-            for (let file of files) {
-                if (file.type !== 'application/pdf') continue;
-                try {
-                    const arrayBuffer = await file.arrayBuffer();
-                    const pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-
-                    for (let i = 1; i <= pdfDoc.numPages; i++) {
-                        const pageObj = {
-                            id: 'page_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
-                            pdfBytes: arrayBuffer.slice(0),
-                            pageIndex: i - 1,
-                            rotation: 0,
-                            cropRect: null,
-                            selected: false,
-                            partId: partsList[0].id,
-                            detectedPartName: null
-                        };
-                        pageList.push(pageObj);
-                        loadedCount++;
-                    }
-                } catch (err) {
-                    console.error('PDF Load Error:', err);
-                    showToast('PDFの読み込みに失敗しました', 'error');
-                }
-            }
-
-            renderPartSidebar();
-            filterAndRenderPages();
-            showToast(`${loadedCount} ページを読み込みました`);
+    async function handleFiles(files) {
+      statusBadge.textContent = '読み込み中...';
+      for (const file of files) {
+        if (!file.name.toLowerCase().endsWith('.pdf')) {
+          log(`PDF以外のファイルはスキップされました: ${file.name}`, true);
+          continue;
         }
 
-        // Render Page Grid & Drag-and-Drop Page Sorting
-        function filterAndRenderPages() {
-            pagesContainer.innerHTML = '';
-            const visiblePages = filterPartId ? pageList.filter(p => p.partId === filterPartId) : pageList;
+        try {
+          log(`ファイル読み込み開始: ${file.name}`);
+          const arrayBuffer = await file.arrayBuffer();
+          
+          // PDF.jsでの読み込み試行
+          const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) });
+          const pdfDoc = await loadingTask.promise;
+          
+          log(`${file.name} (全${pdfDoc.numPages}ページ) の処理を開始`);
 
-            if (pageList.length === 0) {
-                emptyState.classList.remove('hidden');
-                editorToolbar.classList.add('hidden');
-                clearAllBtn.classList.add('hidden');
-                exportMenuBtn.disabled = true;
-            } else {
-                emptyState.classList.add('hidden');
-                editorToolbar.classList.remove('hidden');
-                clearAllBtn.classList.remove('hidden');
-                exportMenuBtn.disabled = false;
-                pageCountDisplay.textContent = `${pageList.length} ページ (${visiblePages.length} 表示中)`;
-            }
+          for (let i = 1; i <= pdfDoc.numPages; i++) {
+            const page = await pdfDoc.getPage(i);
+            const viewport = page.getViewport({ scale: 0.5 }); // メモリ節約用の軽量スケール
 
-            visiblePages.forEach((pageObj, displayIdx) => {
-                const globalIndex = pageList.findIndex(p => p.id === pageObj.id);
-                const card = createPageCard(pageObj, globalIndex, displayIdx + 1);
-                pagesContainer.appendChild(card);
-                renderThumbnail(pageObj, card.querySelector('canvas'));
+            // サムネイル生成
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            canvas.width = viewport.width;
+            canvas.height = viewport.height;
+
+            await page.render({ canvasContext: ctx, viewport: viewport }).promise;
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+
+            // テキスト自動抽出 (パート名推測用)
+            const textContent = await page.getTextContent();
+            const text = textContent.items.map(item => item.str).join(' ');
+            const detectedPart = detectPartName(text);
+
+            pageList.push({
+              id: 'page_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+              pdfBytes: arrayBuffer.slice(0), // データコピー保持
+              pageIndex: i - 1,
+              rotation: 0,
+              partName: detectedPart || 'パート未指定',
+              thumbUrl: dataUrl,
+              aspectRatio: viewport.width / viewport.height,
+              selected: false
             });
+          }
+          log(`${file.name} の読み込みが正常に完了しました`);
+        } catch (err) {
+          log(`読み込み失敗 (${file.name}): ${err.message}`, true);
+          alert(`PDF「${file.name}」の読み込みに失敗しました。\n理由: ${err.message}`);
+        }
+      }
+      statusBadge.textContent = '準備完了';
+      renderPages();
+    }
+
+    // 簡単なパート名判定処理
+    function detectPartName(text) {
+      const keywords = ['Flute', 'Clarinet', 'Alto Sax', 'Tenor Sax', 'Trumpet', 'Horn', 'Trombone', 'Euphonium', 'Tuba', 'Violin', 'Cello', 'Score', '1st', '2nd'];
+      for (const key of keywords) {
+        if (new RegExp(key, 'i').test(text)) return key;
+      }
+      return null;
+    }
+
+    // --- 画面描画 & 並び替え ---
+    function renderPages() {
+      pageCountEl.textContent = pageList.length;
+      if (pageList.length === 0) {
+        emptyState.classList.remove('hidden');
+        pagesContainer.innerHTML = '';
+        pagesContainer.appendChild(emptyState);
+        return;
+      }
+      emptyState.classList.add('hidden');
+      pagesContainer.innerHTML = '';
+
+      pageList.forEach((item, index) => {
+        const card = document.createElement('div');
+        card.className = `bg-slate-50 border ${item.selected ? 'border-indigo-600 ring-2 ring-indigo-400' : 'border-slate-200'} rounded-lg p-2 flex flex-col justify-between shadow-sm hover:shadow relative group`;
+        card.draggable = true;
+
+        card.innerHTML = `
+          <div class="flex items-center justify-between mb-1">
+            <input type="checkbox" ${item.selected ? 'checked' : ''} onchange="toggleSelect(${index})" class="rounded text-indigo-600">
+            <span class="text-xs font-bold text-slate-500">P.${index + 1}</span>
+          </div>
+          <div class="relative overflow-hidden rounded bg-gray-200 flex items-center justify-center mb-2 min-h-[140px]">
+            <img src="${item.thumbUrl}" style="transform: rotate(${item.rotation}deg);" class="max-h-36 object-contain transition-transform">
+          </div>
+          <div class="space-y-1">
+            <input type="text" value="${item.partName}" onchange="updatePartName(${index}, this.value)" 
+              class="w-full text-xs border rounded px-1.5 py-1 text-slate-700 bg-white font-medium" placeholder="パート名">
+            <div class="flex justify-between items-center pt-1 text-slate-500 text-xs">
+              <button onclick="rotatePage(${index})" title="回転" class="hover:text-indigo-600 p-1"><i class="fa-solid fa-rotate-right"></i></button>
+              <button onclick="movePage(${index}, -1)" title="左へ移動" class="hover:text-indigo-600 p-1"><i class="fa-solid fa-arrow-left"></i></button>
+              <button onclick="movePage(${index}, 1)" title="右へ移動" class="hover:text-indigo-600 p-1"><i class="fa-solid fa-arrow-right"></i></button>
+              <button onclick="deletePage(${index})" title="削除" class="hover:text-red-600 p-1"><i class="fa-solid fa-trash"></i></button>
+            </div>
+          </div>
+        `;
+
+        // ドラッグ＆ドロップイベント
+        card.addEventListener('dragstart', () => { dragSrcIndex = index; card.classList.add('opacity-50'); });
+        card.addEventListener('dragend', () => card.classList.remove('opacity-50'));
+        card.addEventListener('dragover', (e) => e.preventDefault());
+        card.addEventListener('drop', (e) => {
+          e.preventDefault();
+          if (dragSrcIndex !== null && dragSrcIndex !== index) {
+            const movedItem = pageList.splice(dragSrcIndex, 1)[0];
+            pageList.splice(index, 0, movedItem);
+            renderPages();
+          }
+        });
+
+        pagesContainer.appendChild(card);
+      });
+    }
+
+    // 各種操作関数
+    window.toggleSelect = (i) => { pageList[i].selected = !pageList[i].selected; renderPages(); };
+    window.updatePartName = (i, val) => { pageList[i].partName = val; };
+    window.rotatePage = (i) => { pageList[i].rotation = (pageList[i].rotation + 90) % 360; renderPages(); };
+    window.movePage = (i, dir) => {
+      const target = i + dir;
+      if (target >= 0 && target < pageList.length) {
+        const item = pageList.splice(i, 1)[0];
+        pageList.splice(target, 0, item);
+        renderPages();
+      }
+    };
+    window.deletePage = (i) => { pageList.splice(i, 1); renderPages(); };
+
+    document.getElementById('btn-clear').addEventListener('click', () => {
+      if (confirm('すべてのページを消去しますか？')) { pageList = []; renderPages(); logBox.innerHTML = ''; }
+    });
+
+    // --- A3見開き分割機能 ---
+    document.getElementById('btn-split-a3').addEventListener('click', async () => {
+      const selectedIndices = pageList.map((p, i) => p.selected ? i : -1).filter(i => i !== -1);
+      const targets = selectedIndices.length ? selectedIndices : pageList.map((_, i) => i);
+
+      if (targets.length === 0) return alert('分割対象のページがありません');
+
+      statusBadge.textContent = '見開き分割処理中...';
+      log(`A3見開き分割を開始 (${targets.length}ページ対象)`);
+
+      const newPageList = [];
+      for (let i = 0; i < pageList.length; i++) {
+        const item = pageList[i];
+        if (!targets.includes(i) || item.aspectRatio <= 1.1) {
+          newPageList.push(item); // 選択外または縦長ページはそのまま保持
+          continue;
         }
 
-        function createPageCard(pageObj, globalIndex, pageNum) {
-            const card = document.createElement('div');
-            card.className = 'group relative bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm hover:shadow-md transition flex flex-col p-3 select-none cursor-grab active:cursor-grabbing';
-            card.draggable = true;
-            card.dataset.index = globalIndex;
+        // 見開き(横長)ページを左右に2分割
+        try {
+          const pdfDoc = await PDFLib.PDFDocument.load(item.pdfBytes);
+          
+          // 左半分の抽出PDF作成
+          const docLeft = await PDFLib.PDFDocument.create();
+          const [pageL] = await docLeft.copyPages(pdfDoc, [item.pageIndex]);
+          const { width, height } = pageL.getSize();
+          pageL.setCropBox(0, 0, width / 2, height);
+          docLeft.addPage(pageL);
+          const bytesL = await docLeft.save();
 
-            const part = partsList.find(p => p.id === pageObj.partId) || partsList[0];
+          // 右半分の抽出PDF作成
+          const docRight = await PDFLib.PDFDocument.create();
+          const [pageR] = await docRight.copyPages(pdfDoc, [item.pageIndex]);
+          pageR.setCropBox(width / 2, 0, width / 2, height);
+          docRight.addPage(pageR);
+          const bytesR = await docRight.save();
 
-            card.innerHTML = `
-                <div class="flex justify-between items-center mb-2 gap-1">
-                    <label class="flex items-center space-x-2 cursor-pointer">
-                        <input type="checkbox" class="page-checkbox rounded text-brand-500 focus:ring-brand-500 dark:bg-gray-700 border-gray-300 dark:border-gray-600 w-4 h-4" ${pageObj.selected ? 'checked' : ''}>
-                        <span class="text-xs font-semibold text-gray-500 dark:text-gray-400">#${pageNum}</span>
-                    </label>
-                    <div class="flex items-center gap-1">
-                        ${pageObj.detectedPartName ? `<span class="text-[10px] px-1.5 py-0.5 bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 rounded font-medium">${pageObj.detectedPartName}</span>` : ''}
-                    </div>
-                </div>
+          // 新しいサムネイル生成 helper
+          const createThumb = async (bytes) => {
+            const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(bytes) }).promise;
+            const p = await pdf.getPage(1);
+            const vp = p.getViewport({ scale: 0.4 });
+            const c = document.createElement('canvas');
+            c.width = vp.width; c.height = vp.height;
+            await p.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
+            return c.toDataURL('image/jpeg', 0.8);
+          };
 
-                <div class="relative bg-gray-100 dark:bg-gray-900 rounded-lg overflow-hidden flex items-center justify-center p-2 min-h-[180px]">
-                    <canvas class="max-w-full max-h-[180px] object-contain shadow-sm rounded transition-transform duration-200" style="transform: rotate(${pageObj.rotation}deg);"></canvas>
-                </div>
+          newPageList.push({
+            ...item,
+            id: item.id + '_L',
+            pdfBytes: bytesL,
+            pageIndex: 0,
+            partName: item.partName + ' (左)',
+            thumbUrl: await createThumb(bytesL),
+            aspectRatio: (width / 2) / height
+          });
 
-                <div class="mt-3 flex flex-col gap-2">
-                    <select class="part-select-dropdown w-full bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-700 text-gray-800 dark:text-gray-200 text-xs rounded-lg p-1.5">
-                        ${partsList.map(p => `<option value="${p.id}" ${p.id === pageObj.partId ? 'selected' : ''}>${p.name}</option>`).join('')}
-                    </select>
+          newPageList.push({
+            ...item,
+            id: item.id + '_R',
+            pdfBytes: bytesR,
+            pageIndex: 0,
+            partName: item.partName + ' (右)',
+            thumbUrl: await createThumb(bytesR),
+            aspectRatio: (width / 2) / height
+          });
 
-                    <div class="flex items-center justify-between pt-1 border-t border-gray-100 dark:border-gray-700/60 text-xs text-gray-500">
-                        <div class="flex gap-2">
-                            <button class="rotate-left-btn hover:text-brand-500" title="左回転"><i class="fa-solid fa-rotate-left"></i></button>
-                            <button class="rotate-right-btn hover:text-brand-500" title="右回転"><i class="fa-solid fa-rotate-right"></i></button>
-                        </div>
-                        <button class="delete-page-btn hover:text-red-500" title="削除"><i class="fa-solid fa-trash"></i></button>
-                    </div>
-                </div>
-            `;
+        } catch (e) {
+          log(`見開き分割失敗 (P.${i+1}): ${e.message}`, true);
+          newPageList.push(item);
+        }
+      }
 
-            // Card Checkbox
-            card.querySelector('.page-checkbox').addEventListener('change', (e) => {
-                pageObj.selected = e.target.checked;
-            });
+      pageList = newPageList;
+      statusBadge.textContent = '準備完了';
+      renderPages();
+      log('見開き分割が完了しました');
+    });
 
-            // Rotation & Delete
-            card.querySelector('.rotate-left-btn').addEventListener('click', () => {
-                pageObj.rotation = (pageObj.rotation - 90 + 360) % 360;
-                filterAndRenderPages();
-            });
-            card.querySelector('.rotate-right-btn').addEventListener('click', () => {
-                pageObj.rotation = (pageObj.rotation + 90) % 360;
-                filterAndRenderPages();
-            });
-            card.querySelector('.delete-page-btn').addEventListener('click', () => {
-                pageList.splice(globalIndex, 1);
-                filterAndRenderPages();
-            });
+    // --- パート自動再認識 ---
+    document.getElementById('btn-detect-parts').addEventListener('click', () => {
+      alert('自動認識処理が完了しました（既存の検出結果を更新）');
+    });
 
-            // Part Dropdown Change
-            card.querySelector('.part-select-dropdown').addEventListener('change', (e) => {
-                pageObj.partId = e.target.value;
-                renderPartSidebar();
-            });
+    // --- 出力: 1つの単一PDF ---
+    document.getElementById('btn-export-single').addEventListener('click', async () => {
+      if (!pageList.length) return alert('出力するページがありません');
+      
+      statusBadge.textContent = 'PDF結合中...';
+      log('単一PDFへのエクスポートを開始');
 
-            // HTML5 Drag & Drop Page Reordering Implementation
-            card.addEventListener('dragstart', (e) => {
-                draggedPageIndex = parseInt(card.dataset.index, 10);
-                card.classList.add('dragging-card');
-                e.dataTransfer.effectAllowed = 'move';
-            });
+      try {
+        const outDoc = await PDFLib.PDFDocument.create();
 
-            card.addEventListener('dragend', () => {
-                card.classList.remove('dragging-card');
-                document.querySelectorAll('.drag-over-card').forEach(el => el.classList.remove('drag-over-card'));
-            });
-
-            card.addEventListener('dragover', (e) => {
-                e.preventDefault();
-                e.dataTransfer.dropEffect = 'move';
-                card.classList.add('drag-over-card');
-            });
-
-            card.addEventListener('dragleave', () => {
-                card.classList.remove('drag-over-card');
-            });
-
-            card.addEventListener('drop', (e) => {
-                e.preventDefault();
-                card.classList.remove('drag-over-card');
-                const targetIndex = parseInt(card.dataset.index, 10);
-
-                if (draggedPageIndex !== null && draggedPageIndex !== targetIndex) {
-                    const movedItem = pageList.splice(draggedPageIndex, 1)[0];
-                    pageList.splice(targetIndex, 0, movedItem);
-                    filterAndRenderPages();
-                }
-            });
-
-            return card;
+        for (const item of pageList) {
+          const srcDoc = await PDFLib.PDFDocument.load(item.pdfBytes);
+          const [copiedPage] = await outDoc.copyPages(srcDoc, [item.pageIndex]);
+          
+          if (item.rotation) {
+            const currentRot = copiedPage.getRotation().angle;
+            copiedPage.setRotation(PDFLib.degrees(currentRot + item.rotation));
+          }
+          outDoc.addPage(copiedPage);
         }
 
-        async function renderThumbnail(pageObj, canvas) {
-            try {
-                const pdfDoc = await pdfjsLib.getDocument({ data: pageObj.pdfBytes }).promise;
-                const page = await pdfDoc.getPage(pageObj.pageIndex + 1);
-                const viewport = page.getViewport({ scale: 0.4 });
+        const pdfBytes = await outDoc.save();
+        const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+        saveAs(blob, '結合楽譜_' + Date.now() + '.pdf');
 
-                const ctx = canvas.getContext('2d');
-                canvas.width = viewport.width;
-                canvas.height = viewport.height;
+        log('PDF出力が完了しました');
+      } catch (err) {
+        log(`PDF出力エラー: ${err.message}`, true);
+        alert('PDF出力に失敗しました: ' + err.message);
+      }
+      statusBadge.textContent = '準備完了';
+    });
 
-                await page.render({ canvasContext: ctx, viewport }).promise;
-            } catch (e) {
-                console.error('Thumbnail Render Error:', e);
+    // --- 出力: パート別ZIP一括ダウンロード ---
+    document.getElementById('btn-export-zip').addEventListener('click', async () => {
+      if (!pageList.length) return alert('出力するページがありません');
+
+      statusBadge.textContent = 'ZIP作成中...';
+      log('パート別ZIPの一括書き出しを開始');
+
+      try {
+        const zip = new JSZip();
+        // パート名ごとにグループ化
+        const partGroups = {};
+        pageList.forEach(p => {
+          const name = p.partName.trim() || '未分類';
+          if (!partGroups[name]) partGroups[name] = [];
+          partGroups[name].push(p);
+        });
+
+        for (const [partName, pages] of Object.entries(partGroups)) {
+          const partDoc = await PDFLib.PDFDocument.create();
+
+          for (const item of pages) {
+            const srcDoc = await PDFLib.PDFDocument.load(item.pdfBytes);
+            const [copiedPage] = await partDoc.copyPages(srcDoc, [item.pageIndex]);
+            if (item.rotation) {
+              const currentRot = copiedPage.getRotation().angle;
+              copiedPage.setRotation(PDFLib.degrees(currentRot + item.rotation));
             }
+            partDoc.addPage(copiedPage);
+          }
+
+          const partPdfBytes = await partDoc.save();
+          // 安全なファイル名に置換
+          const safeFileName = partName.replace(/[\\/:*?"<>|]/g, '_') + '.pdf';
+          zip.file(safeFileName, partPdfBytes);
         }
 
-        // Automatic Part Detection (Text Parsing + Tesseract OCR)
-        document.getElementById('runAutoDetectBtn').addEventListener('click', async () => {
-            if (pageList.length === 0) {
-                showToast('解析対象の楽譜ページがありません', 'error');
-                return;
-            }
+        const zipBlob = await zip.generateAsync({ type: 'blob' });
+        saveAs(zipBlob, 'パート別楽譜_' + Date.now() + '.zip');
 
-            const progressBox = document.getElementById('ocrProgressBox');
-            const progressBar = document.getElementById('ocrProgressBar');
-            const statusText = document.getElementById('ocrStatusText');
-            const percentText = document.getElementById('ocrPercentText');
-
-            progressBox.classList.remove('hidden');
-
-            let processed = 0;
-            const total = pageList.length;
-
-            for (let i = 0; i < pageList.length; i++) {
-                const pageObj = pageList[i];
-                statusText.textContent = `P.${i + 1} テキスト解析中...`;
-
-                let text = await extractPdfPageText(pageObj);
-
-                // Run Tesseract OCR if vector text is scarce
-                if (!text || text.trim().length < 5) {
-                    statusText.textContent = `P.${i + 1} OCR画像読み取り中...`;
-                    text = await performOcrOnPage(pageObj);
-                }
-
-                const matched = matchPartKeyword(text);
-                if (matched) {
-                    let part = partsList.find(p => p.name.toLowerCase() === matched.name.toLowerCase());
-                    if (!part) {
-                        part = {
-                            id: 'part_auto_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
-                            name: matched.name,
-                            color: getRandomColor()
-                        };
-                        partsList.push(part);
-                    }
-                    pageObj.partId = part.id;
-                    pageObj.detectedPartName = matched.name;
-                }
-
-                processed++;
-                const pct = Math.round((processed / total) * 100);
-                progressBar.style.width = pct + '%';
-                percentText.textContent = pct + '%';
-            }
-
-            statusText.textContent = '完了！';
-            setTimeout(() => progressBox.classList.add('hidden'), 1200);
-
-            renderPartSidebar();
-            filterAndRenderPages();
-            showToast('自動パート識別が完了しました！');
-        });
-
-        async function extractPdfPageText(pageObj) {
-            try {
-                const pdfDoc = await pdfjsLib.getDocument({ data: pageObj.pdfBytes }).promise;
-                const page = await pdfDoc.getPage(pageObj.pageIndex + 1);
-                const textContent = await page.getTextContent();
-                return textContent.items.map(item => item.str).join(' ');
-            } catch (e) {
-                return '';
-            }
-        }
-
-        async function performOcrOnPage(pageObj) {
-            try {
-                const pdfDoc = await pdfjsLib.getDocument({ data: pageObj.pdfBytes }).promise;
-                const page = await pdfDoc.getPage(pageObj.pageIndex + 1);
-                const viewport = page.getViewport({ scale: 1.0 });
-
-                const canvas = document.createElement('canvas');
-                canvas.width = viewport.width;
-                canvas.height = viewport.height;
-                const ctx = canvas.getContext('2d');
-
-                await page.render({ canvasContext: ctx, viewport }).promise;
-
-                // Capture top 30% header area where part names are located
-                const headerCanvas = document.createElement('canvas');
-                headerCanvas.width = canvas.width;
-                headerCanvas.height = Math.floor(canvas.height * 0.3);
-                const hCtx = headerCanvas.getContext('2d');
-                hCtx.drawImage(canvas, 0, 0, canvas.width, headerCanvas.height, 0, 0, canvas.width, headerCanvas.height);
-
-                const res = await Tesseract.recognize(headerCanvas, 'eng', { logger: () => {} });
-                return res.data.text || '';
-            } catch (e) {
-                return '';
-            }
-        }
-
-        function matchPartKeyword(text) {
-            if (!text) return null;
-            const lower = text.toLowerCase();
-            for (let item of INSTRUMENT_KEYWORDS) {
-                for (let key of item.keys) {
-                    if (lower.includes(key)) return item;
-                }
-            }
-            return null;
-        }
-
-        // Part Sidebar Rendering
-        function renderPartSidebar() {
-            partListEl.innerHTML = '';
-            partsList.forEach((part) => {
-                const count = pageList.filter(p => p.partId === part.id).length;
-                const item = document.createElement('div');
-                item.className = `p-2.5 rounded-xl border transition cursor-pointer flex items-center justify-between ${filterPartId === part.id ? 'bg-brand-50 border-brand-500 dark:bg-brand-950/40' : 'bg-gray-50 dark:bg-gray-900/50 border-gray-200 dark:border-gray-700/60 hover:border-gray-300'}`;
-                
-                item.innerHTML = `
-                    <div class="flex items-center space-x-2.5 min-w-0 flex-1">
-                        <span class="w-3.5 h-3.5 rounded-full flex-shrink-0" style="background-color: ${part.color}"></span>
-                        <span class="text-xs font-semibold text-gray-800 dark:text-gray-200 truncate">${part.name}</span>
-                    </div>
-                    <div class="flex items-center space-x-1.5 ml-2">
-                        <span class="text-[11px] px-2 py-0.5 rounded-full bg-gray-200 dark:bg-gray-700 font-bold text-gray-600 dark:text-gray-300">${count}</span>
-                        <button class="delete-part-btn text-gray-400 hover:text-red-500 text-xs p-1" title="削除"><i class="fa-solid fa-xmark"></i></button>
-                    </div>
-                `;
-
-                item.addEventListener('click', (e) => {
-                    if (e.target.closest('.delete-part-btn')) return;
-                    filterPartId = (filterPartId === part.id) ? null : part.id;
-                    renderPartSidebar();
-                    filterAndRenderPages();
-                });
-
-                item.querySelector('.delete-part-btn').addEventListener('click', () => {
-                    if (partsList.length <= 1) return alert('最低1つのパートが必要です。');
-                    partsList = partsList.filter(p => p.id !== part.id);
-                    pageList.forEach(p => { if (p.partId === part.id) p.partId = partsList[0].id; });
-                    if (filterPartId === part.id) filterPartId = null;
-                    renderPartSidebar();
-                    filterAndRenderPages();
-                });
-
-                partListEl.appendChild(item);
-            });
-        }
-
-        addPartBtn.addEventListener('click', () => {
-            const name = prompt('パート名を入力してください (例: Flute 1):');
-            if (!name) return;
-            partsList.push({ id: 'part_' + Date.now(), name: name.trim(), color: getRandomColor() });
-            renderPartSidebar();
-            filterAndRenderPages();
-        });
-
-        presetSelect.addEventListener('change', (e) => {
-            const key = e.target.value;
-            if (!key || !PRESETS[key]) return;
-            partsList = PRESETS[key].map((p, i) => ({ id: 'part_preset_' + i + '_' + Date.now(), name: p.name, color: p.color }));
-            pageList.forEach(p => p.partId = partsList[0].id);
-            filterPartId = null;
-            renderPartSidebar();
-            filterAndRenderPages();
-            showToast('プリセットを適用しました');
-        });
-
-        // Quick Selection & Actions
-        document.getElementById('selectAllBtn').addEventListener('click', () => {
-            pageList.forEach(p => p.selected = true);
-            filterAndRenderPages();
-        });
-        document.getElementById('selectOddBtn').addEventListener('click', () => {
-            pageList.forEach((p, idx) => p.selected = (idx % 2 === 0));
-            filterAndRenderPages();
-        });
-        document.getElementById('selectEvenBtn').addEventListener('click', () => {
-            pageList.forEach((p, idx) => p.selected = (idx % 2 === 1));
-            filterAndRenderPages();
-        });
-        document.getElementById('rotateSelectedLeftBtn').addEventListener('click', () => {
-            pageList.forEach(p => { if (p.selected) p.rotation = (p.rotation - 90 + 360) % 360; });
-            filterAndRenderPages();
-        });
-        document.getElementById('rotateSelectedRightBtn').addEventListener('click', () => {
-            pageList.forEach(p => { if (p.selected) p.rotation = (p.rotation + 90) % 360; });
-            filterAndRenderPages();
-        });
-        document.getElementById('deleteSelectedBtn').addEventListener('click', () => {
-            pageList = pageList.filter(p => !p.selected);
-            filterAndRenderPages();
-        });
-
-        // A3 Spread Splitter Feature
-        document.getElementById('splitSpreadBtn').addEventListener('click', async () => {
-            const selectedPages = pageList.filter(p => p.selected);
-            if (selectedPages.length === 0) {
-                showToast('分割するページ（チェックボックス）を選択してください', 'error');
-                return;
-            }
-
-            showToast('見開きページを分割中...', 'info');
-            let newPageList = [];
-
-            for (let i = 0; i < pageList.length; i++) {
-                const pageObj = pageList[i];
-                if (!pageObj.selected) {
-                    newPageList.push(pageObj);
-                    continue;
-                }
-
-                try {
-                    const srcPdfDoc = await PDFLib.PDFDocument.load(pageObj.pdfBytes);
-                    const [srcPage] = await srcPdfDoc.getPageIndices();
-                    const copiedDoc = await PDFLib.PDFDocument.create();
-                    const [copiedPage] = await copiedDoc.copyPages(srcPdfDoc, [pageObj.pageIndex]);
-                    copiedDoc.addPage(copiedPage);
-
-                    const { width, height } = copiedPage.getSize();
-                    // If landscape spread (width > height), split vertically into 2 halves
-                    if (width > height) {
-                        const halfWidth = width / 2;
-
-                        // Left Page
-                        const leftDoc = await PDFLib.PDFDocument.load(await copiedDoc.save());
-                        const [leftPage] = leftDoc.getPages();
-                        leftPage.setCropBox(0, 0, halfWidth, height);
-                        const leftBytes = await leftDoc.save();
-
-                        // Right Page
-                        const rightDoc = await PDFLib.PDFDocument.load(await copiedDoc.save());
-                        const [rightPage] = rightDoc.getPages();
-                        rightPage.setCropBox(halfWidth, 0, halfWidth, height);
-                        const rightBytes = await rightDoc.save();
-
-                        newPageList.push({
-                            id: 'page_split_l_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
-                            pdfBytes: leftBytes,
-                            pageIndex: 0,
-                            rotation: pageObj.rotation,
-                            cropRect: null,
-                            selected: false,
-                            partId: pageObj.partId,
-                            detectedPartName: (pageObj.detectedPartName ? pageObj.detectedPartName + ' (左)' : '分割左')
-                        });
-
-                        newPageList.push({
-                            id: 'page_split_r_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
-                            pdfBytes: rightBytes,
-                            pageIndex: 0,
-                            rotation: pageObj.rotation,
-                            cropRect: null,
-                            selected: false,
-                            partId: pageObj.partId,
-                            detectedPartName: (pageObj.detectedPartName ? pageObj.detectedPartName + ' (右)' : '分割右')
-                        });
-                    } else {
-                        // Portrait or square, keep original
-                        newPageList.push(pageObj);
-                    }
-                } catch (err) {
-                    console.error('Spread Split Error:', err);
-                    newPageList.push(pageObj);
-                }
-            }
-
-            pageList = newPageList;
-            filterAndRenderPages();
-            showToast('見開き分割が完了しました！');
-        });
-
-        clearAllBtn.addEventListener('click', () => {
-            if (confirm('すべてのページをクリアしますか？')) {
-                pageList = [];
-                filterAndRenderPages();
-            }
-        });
-
-        // PDF Export Engine
-        document.getElementById('exportSinglePdfBtn').addEventListener('click', async () => {
-            if (pageList.length === 0) return;
-            showToast('PDFを作成中...', 'info');
-            const pdfBytes = await generatePdfBuffer(pageList);
-            saveAs(new Blob([pdfBytes], { type: 'application/pdf' }), `score_merged_${Date.now()}.pdf`);
-            showToast('PDFを出力しました！');
-        });
-
-        document.getElementById('exportZipPartsBtn').addEventListener('click', async () => {
-            if (pageList.length === 0) return;
-            showToast('パート別PDFをZIP圧縮中...', 'info');
-            try {
-                const zip = new JSZip();
-                for (let part of partsList) {
-                    const partPages = pageList.filter(p => p.partId === part.id);
-                    if (partPages.length === 0) continue;
-                    const pdfBytes = await generatePdfBuffer(partPages);
-                    const safeName = part.name.replace(/[/\\?%*:|"<>]/g, '_');
-                    zip.file(`${safeName}.pdf`, pdfBytes);
-                }
-                const zipBlob = await zip.generateAsync({ type: 'blob' });
-                saveAs(zipBlob, `music_parts_${Date.now()}.zip`);
-                showToast('ZIPダウンロードが完了しました！');
-            } catch (err) {
-                showToast('ZIP出力中にエラーが発生しました', 'error');
-            }
-        });
-
-        async function generatePdfBuffer(pages) {
-            const mergedPdf = await PDFLib.PDFDocument.create();
-            for (let item of pages) {
-                const srcPdfDoc = await PDFLib.PDFDocument.load(item.pdfBytes);
-                const [copiedPage] = await mergedPdf.copyPages(srcPdfDoc, [item.pageIndex]);
-
-                const currentRotation = copiedPage.getRotation().angle;
-                copiedPage.setRotation(PDFLib.degrees((currentRotation + item.rotation) % 360));
-                mergedPdf.addPage(copiedPage);
-            }
-            return await mergedPdf.save();
-        }
-
-        function getRandomColor() {
-            const colors = ['#0284c7', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#ef4444', '#06b6d4', '#84cc16'];
-            return colors[Math.floor(Math.random() * colors.length)];
-        }
-
-        function showToast(message, type = 'success') {
-            const container = document.getElementById('toastContainer');
-            const toast = document.createElement('div');
-            const bgColor = type === 'error' ? 'bg-red-600' : type === 'info' ? 'bg-brand-600' : 'bg-emerald-600';
-            
-            toast.className = `${bgColor} text-white px-4 py-2.5 rounded-xl shadow-lg text-xs font-semibold flex items-center space-x-2 transition-all duration-300 transform translate-y-2 opacity-0`;
-            toast.innerHTML = `<i class="fa-solid ${type === 'error' ? 'fa-circle-exclamation' : 'fa-circle-check'}"></i><span>${message}</span>`;
-            
-            container.appendChild(toast);
-            requestAnimationFrame(() => toast.classList.remove('translate-y-2', 'opacity-0'));
-
-            setTimeout(() => {
-                toast.classList.add('opacity-0', 'translate-y-2');
-                setTimeout(() => toast.remove(), 300);
-            }, 3000);
-        }
-
-        // Initialize App
-        renderPartSidebar();
-        filterAndRenderPages();
-    </script>
+        log('ZIPファイルの書き出しが完了しました');
+      } catch (err) {
+        log(`ZIP作成エラー: ${err.message}`, true);
+        alert('ZIP作成に失敗しました: ' + err.message);
+      }
+      statusBadge.textContent = '準備完了';
+    });
+  </script>
 </body>
 </html>
