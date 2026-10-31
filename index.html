@@ -238,7 +238,7 @@ A3横長などの見開き譜面を真ん中で独立した2枚のページ（A4
 </div>
 <div class="flex-1 p-4 overflow-auto flex items-center justify-center bg-slate-900 relative min-h-[300px]">
 <div id="crop-canvas-wrapper" class="relative inline-block border border-slate-700 shadow-lg">
-<canvas id="crop-canvas"></canvas>
+<canvas id="crop-canvas" class="max-w-full max-h-[65vh] touch-none cursor-crosshair"></canvas>
 <div id="crop-overlay" class="absolute border-2 border-brand-500 bg-brand-500/20 cursor-move hidden">
 <div class="absolute -top-1.5 -left-1.5 w-3 h-3 bg-white border border-brand-500"></div>
 <div class="absolute -top-1.5 -right-1.5 w-3 h-3 bg-white border border-brand-500"></div>
@@ -268,6 +268,12 @@ let partCategories = ['すべて', 'Full Score', 'Flute', 'Oboe', 'Clarinet', 'B
 let activePartFilter = 'すべて';
 let draggedPageIndex = null;
 let activeCropPageIndex = null;
+let activeCropSelection = null;
+let cropDragStart = null;
+let activeThumbnailRenders = 0;
+const thumbnailQueue = [];
+const MAX_THUMBNAIL_RENDERS = 2;
+let isRecognizing = false;
 // DOM Elements
 const dropZone = document.getElementById('drop-zone');
 const emptyState = document.getElementById('empty-state');
@@ -289,7 +295,7 @@ const toast = document.getElementById('toast');
 const toastMsg = document.getElementById('toast-msg');
 const toastIcon = document.getElementById('toast-icon');
 toastMsg.innerText = msg;
-toast.className = ⁠fixed bottom-5 right-5 z-50 flex items-center space-x-2 px-4 py-3 rounded-xl shadow-lg text-sm font-medium transition-all duration-300 text-white ${ type === 'error' ? 'bg-red-600' : type === 'success' ? 'bg-emerald-600' : 'bg-slate-800' }⁠;
+toast.className = `fixed bottom-5 right-5 z-50 flex items-center space-x-2 px-4 py-3 rounded-xl shadow-lg text-sm font-medium transition-all duration-300 text-white ${ type === 'error' ? 'bg-red-600' : type === 'success' ? 'bg-emerald-600' : 'bg-slate-800' }`;
 toast.classList.remove('translate-y-20', 'opacity-0');
 setTimeout(() => {
 toast.classList.add('translate-y-20', 'opacity-0');
@@ -350,6 +356,57 @@ document.getElementById('btn-export-zip').addEventListener('click', exportPartsZ
 // Crop Modal Actions
 document.getElementById('btn-close-crop').addEventListener('click', closeCropModal);
 document.getElementById('btn-cancel-crop').addEventListener('click', closeCropModal);
+// Crop selection by pointer; stored in PDF points for lossless export.
+const cropCanvas = document.getElementById('crop-canvas');
+const cropOverlay = document.getElementById('crop-overlay');
+const updateCropOverlay = (x, y, w, h) => {
+cropOverlay.classList.remove('hidden');
+cropOverlay.style.pointerEvents = 'none';
+cropOverlay.style.left = `${Math.min(x, x + w)}px`;
+cropOverlay.style.top = `${Math.min(y, y + h)}px`;
+cropOverlay.style.width = `${Math.abs(w)}px`;
+cropOverlay.style.height = `${Math.abs(h)}px`;
+};
+cropCanvas.addEventListener('pointerdown', (e) => {
+const r = cropCanvas.getBoundingClientRect();
+const x = (e.clientX - r.left) * cropCanvas.width / r.width;
+const y = (e.clientY - r.top) * cropCanvas.height / r.height;
+cropDragStart = { x, y };
+activeCropSelection = { x, y, width: 1, height: 1 };
+cropCanvas.setPointerCapture(e.pointerId);
+updateCropOverlay(x, y, 1, 1);
+});
+cropCanvas.addEventListener('pointermove', (e) => {
+if (!cropDragStart) return;
+const r = cropCanvas.getBoundingClientRect();
+const x = (e.clientX - r.left) * cropCanvas.width / r.width;
+const y = (e.clientY - r.top) * cropCanvas.height / r.height;
+activeCropSelection = { x: Math.min(cropDragStart.x, x), y: Math.min(cropDragStart.y, y), width: Math.abs(x - cropDragStart.x), height: Math.abs(y - cropDragStart.y) };
+updateCropOverlay(cropDragStart.x, cropDragStart.y, x - cropDragStart.x, y - cropDragStart.y);
+});
+const finishCropPointer = () => { cropDragStart = null; };
+cropCanvas.addEventListener('pointerup', finishCropPointer);
+cropCanvas.addEventListener('pointercancel', finishCropPointer);
+document.getElementById('btn-reset-crop').addEventListener('click', () => {
+if (activeCropPageIndex === null) return;
+pageList[activeCropPageIndex].cropBox = null;
+activeCropSelection = null;
+cropOverlay.classList.add('hidden');
+showToast('切り抜き範囲をリセットしました', 'success');
+});
+document.getElementById('btn-apply-crop').addEventListener('click', () => {
+if (activeCropPageIndex === null || !activeCropSelection || activeCropSelection.width < 5 || activeCropSelection.height < 5) {
+showToast('キャンバス上をドラッグして切り抜き範囲を選択してください', 'error'); return;
+}
+const item = pageList[activeCropPageIndex];
+const sx = item.width / cropCanvas.width;
+const sy = item.height / cropCanvas.height;
+const box = activeCropSelection;
+item.cropBox = { x: box.x * sx, y: item.height - (box.y + box.height) * sy, width: box.width * sx, height: box.height * sy };
+closeCropModal();
+renderPagesGrid();
+showToast('切り抜き範囲を適用しました', 'success');
+});
 }
 // Handle File Selection
 async function handleFileSelect(e) {
@@ -361,42 +418,42 @@ fileInput.value = '';
 }
 // Process PDF Files Lightweight Memory Safe
 async function processFiles(files) {
+const validFiles = Array.from(files || []).filter(file => file && (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')));
+if (!validFiles.length) { showToast('PDFファイルを選択してください', 'error'); return; }
 showToast('PDFを読み込み中...', 'info');
-for (let i = 0; i < files.length; i++) {
-const file = files[i];
-if (file.type !== 'application/pdf' && !file.name.endsWith('.pdf')) continue;
+let addedPages = 0;
+let failedFiles = 0;
+for (const file of validFiles) {
+let pdfDoc = null;
 try {
-const arrayBuffer = await file.arrayBuffer();
-// Store immutable cloned buffer
-const pdfDoc = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
-const pageNumTotal = pdfDoc.numPages;
-for (let pageNum = 1; pageNum <= pageNumTotal; pageNum++) {
+const sourceBuffer = await file.arrayBuffer();
+// PDF.js receives a copy so its worker cannot detach the buffer retained for exports.
+pdfDoc = await pdfjsLib.getDocument({ data: new Uint8Array(sourceBuffer.slice(0)) }).promise;
+for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
 const page = await pdfDoc.getPage(pageNum);
-const viewport = page.getViewport({ scale: 1.0 });
-const pageObj = {
-id: 'page_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+try {
+const viewport = page.getViewport({ scale: 1 });
+pageList.push({
+id: 'page_' + Date.now() + '_' + Math.random().toString(36).slice(2, 10),
 originalFileName: file.name,
-pdfBuffer: arrayBuffer.slice(0), // Clean Slice Copy
-pageNum: pageNum,
-rotation: 0,
-cropBox: null, // { x, y, width, height } in points
-partName: '未分類',
-selected: false,
-width: viewport.width,
-height: viewport.height
-};
-pageList.push(pageObj);
-page.cleanup();
+pdfBuffer: sourceBuffer,
+pageNum, rotation: 0, cropBox: null, partName: '未分類', selected: false,
+width: viewport.width, height: viewport.height
+});
+addedPages++;
+} finally { page.cleanup(); }
 }
-pdfDoc.destroy();
 } catch (err) {
-console.error('File load error:', err);
-showToast(⁠ファイル [${file.name}] の読み込みに失敗しました⁠, 'error');
+failedFiles++;
+console.error('File load error:', file.name, err);
+showToast(`ファイル「${file.name}」の読み込みに失敗しました`, 'error');
+} finally {
+if (pdfDoc) { try { await pdfDoc.destroy(); } catch (_) {} }
 }
 }
 renderPagesGrid();
 renderPartCategories();
-showToast('PDFの読み込みが完了しました', 'success');
+showToast(`${addedPages}ページを読み込みました${failedFiles ? `（失敗 ${failedFiles}ファイル）` : ''}`, failedFiles ? 'error' : 'success');
 }
 // Render Page Cards Grid
 function renderPagesGrid() {
@@ -412,12 +469,12 @@ filterStatus.innerText = '';
 return;
 }
 emptyState.classList.add('hidden');
-pageCountBadge.innerText = ⁠${filteredPages.length} / ${pageList.length} ページ⁠;
-filterStatus.innerText = activePartFilter !== 'すべて' ? ⁠(絞り込み: ${activePartFilter})⁠ : '';
+pageCountBadge.innerText = `${filteredPages.length} / ${pageList.length} ページ`;
+filterStatus.innerText = activePartFilter !== 'すべて' ? `(絞り込み: ${activePartFilter})` : '';
 filteredPages.forEach((pageItem, displayIndex) => {
 const actualIndex = pageList.findIndex(p => p.id === pageItem.id);
 const card = document.createElement('div');
-card.className = ⁠group relative bg-white dark:bg-slate-700 rounded-xl border ${pageItem.selected ? 'border-brand-500 ring-2 ring-brand-500/20' : 'border-slate-200 dark:border-slate-600'} shadow-sm hover:shadow-md transition flex flex-col overflow-hidden cursor-grab active:cursor-grabbing⁠;
+card.className = `group relative bg-white dark:bg-slate-700 rounded-xl border ${pageItem.selected ? 'border-brand-500 ring-2 ring-brand-500/20' : 'border-slate-200 dark:border-slate-600'} shadow-sm hover:shadow-md transition flex flex-col overflow-hidden cursor-grab active:cursor-grabbing`;
 card.draggable = true;
 card.dataset.index = actualIndex;
 // Drag & Drop Handlers for Rearranging
@@ -443,8 +500,10 @@ card.addEventListener('drop', (e) => {
 e.preventDefault();
 card.classList.remove('drag-over-card');
 if (draggedPageIndex !== null && draggedPageIndex !== actualIndex) {
-const movedItem = pageList.splice(draggedPageIndex, 1)[0];
-pageList.splice(actualIndex, 0, movedItem);
+const fromIndex = draggedPageIndex;
+const movedItem = pageList.splice(fromIndex, 1)[0];
+const insertIndex = fromIndex < actualIndex ? actualIndex - 1 : actualIndex;
+pageList.splice(insertIndex, 0, movedItem);
 draggedPageIndex = null;
 renderPagesGrid();
 }
@@ -454,12 +513,12 @@ const thumbBox = document.createElement('div');
 thumbBox.className = 'w-full h-44 bg-slate-100 dark:bg-slate-800 relative flex items-center justify-center p-2 overflow-hidden';
 const canvas = document.createElement('canvas');
 canvas.className = 'max-h-full max-w-full object-contain shadow-sm rounded transition-transform duration-200';
-canvas.style.transform = ⁠rotate(${pageItem.rotation}deg)⁠;
+canvas.style.transform = `rotate(${pageItem.rotation}deg)`;
 thumbBox.appendChild(canvas);
 // Checkbox Overlay
 const checkBtn = document.createElement('button');
-checkBtn.className = ⁠absolute top-2 left-2 w-6 h-6 rounded-md flex items-center justify-center transition ${pageItem.selected ? 'bg-brand-500 text-white' : 'bg-slate-900/40 text-transparent hover:text-white'}⁠;
-checkBtn.innerHTML = ⁠<i data-lucide="check" class="w-4 h-4"></i>⁠;
+checkBtn.className = `absolute top-2 left-2 w-6 h-6 rounded-md flex items-center justify-center transition ${pageItem.selected ? 'bg-brand-500 text-white' : 'bg-slate-900/40 text-transparent hover:text-white'}`;
+checkBtn.innerHTML = `<i data-lucide="check" class="w-4 h-4"></i>`;
 checkBtn.onclick = (e) => {
 e.stopPropagation();
 pageItem.selected = !pageItem.selected;
@@ -474,7 +533,7 @@ thumbBox.appendChild(tagBadge);
 // Actions Overlay
 const cardMeta = document.createElement('div');
 cardMeta.className = 'p-2.5 bg-white dark:bg-slate-700 flex items-center justify-between text-xs border-t border-slate-100 dark:border-slate-600';
-cardMeta.innerHTML = ⁠<span class="font-bold text-slate-400">P.${pageItem.pageNum}</span> <div class="flex items-center space-x-1"> <button onclick="cropPage('${pageItem.id}')" class="p-1 hover:bg-slate-100 dark:hover:bg-slate-600 rounded text-slate-500 dark:text-slate-300" title="トリミング"> <i data-lucide="crop" class="w-3.5 h-3.5"></i> </button> <button onclick="rotatePage('${pageItem.id}')" class="p-1 hover:bg-slate-100 dark:hover:bg-slate-600 rounded text-slate-500 dark:text-slate-300" title="回転"> <i data-lucide="rotate-cw" class="w-3.5 h-3.5"></i> </button> <button onclick="deletePage('${pageItem.id}')" class="p-1 hover:bg-red-50 dark:hover:bg-red-900/30 rounded text-red-500" title="削除"> <i data-lucide="trash-2" class="w-3.5 h-3.5"></i> </button> </div>⁠;
+cardMeta.innerHTML = `<span class="font-bold text-slate-400">P.${pageItem.pageNum}</span> <div class="flex items-center space-x-1"> <button onclick="cropPage('${pageItem.id}')" class="p-1 hover:bg-slate-100 dark:hover:bg-slate-600 rounded text-slate-500 dark:text-slate-300" title="トリミング"> <i data-lucide="crop" class="w-3.5 h-3.5"></i> </button> <button onclick="rotatePage('${pageItem.id}')" class="p-1 hover:bg-slate-100 dark:hover:bg-slate-600 rounded text-slate-500 dark:text-slate-300" title="回転"> <i data-lucide="rotate-cw" class="w-3.5 h-3.5"></i> </button> <button onclick="deletePage('${pageItem.id}')" class="p-1 hover:bg-red-50 dark:hover:bg-red-900/30 rounded text-red-500" title="削除"> <i data-lucide="trash-2" class="w-3.5 h-3.5"></i> </button> </div>`;
 card.appendChild(thumbBox);
 card.appendChild(cardMeta);
 pagesGrid.appendChild(card);
@@ -484,39 +543,54 @@ renderThumbnail(pageItem, canvas);
 lucide.createIcons();
 }
 // Render Canvas Thumbnail Safely
-async function renderThumbnail(pageItem, canvas) {
+function renderThumbnail(pageItem, canvas) {
+thumbnailQueue.push({ pageItem, canvas });
+pumpThumbnailQueue();
+}
+
+async function pumpThumbnailQueue() {
+if (activeThumbnailRenders >= MAX_THUMBNAIL_RENDERS || thumbnailQueue.length === 0) return;
+const job = thumbnailQueue.shift();
+activeThumbnailRenders++;
+let pdfDoc = null;
+let page = null;
 try {
-const pdfDoc = await pdfjsLib.getDocument({ data: new Uint8Array(pageItem.pdfBuffer) }).promise;
-const page = await pdfDoc.getPage(pageItem.pageNum);
-const viewport = page.getViewport({ scale: 0.3 });
-const ctx = canvas.getContext('2d');
-canvas.width = viewport.width;
-canvas.height = viewport.height;
-await page.render({ canvasContext: ctx, viewport: viewport }).promise;
-page.cleanup();
-pdfDoc.destroy();
-} catch (e) {
-console.error('Thumbnail render error:', e);
+if (!job.canvas.isConnected) return;
+pdfDoc = await pdfjsLib.getDocument({ data: new Uint8Array(job.pageItem.pdfBuffer.slice(0)) }).promise;
+page = await pdfDoc.getPage(job.pageItem.pageNum);
+const viewport = page.getViewport({ scale: 0.3, rotation: job.pageItem.rotation || 0 });
+const ctx = job.canvas.getContext('2d', { alpha: false });
+job.canvas.width = Math.ceil(viewport.width);
+job.canvas.height = Math.ceil(viewport.height);
+await page.render({ canvasContext: ctx, viewport }).promise;
+} catch (err) {
+console.error('Thumbnail render error:', err);
+} finally {
+if (page) { try { page.cleanup(); } catch (_) {} }
+if (pdfDoc) { try { await pdfDoc.destroy(); } catch (_) {} }
+activeThumbnailRenders--;
+pumpThumbnailQueue();
 }
 }
 // Category Filter List Rendering
 function renderPartCategories() {
 partCategoryList.innerHTML = '';
 const counts = {};
-pageList.forEach(p => {
-counts[p.partName] = (counts[p.partName] || 0) + 1;
-});
+pageList.forEach(p => { counts[p.partName] = (counts[p.partName] || 0) + 1; });
 partCategories.forEach(cat => {
 const count = cat === 'すべて' ? pageList.length : (counts[cat] || 0);
 const isActive = activePartFilter === cat;
 const badge = document.createElement('button');
-badge.className = ⁠w-full px-3 py-2 rounded-lg text-xs font-medium flex items-center justify-between transition ${ isActive  ? 'bg-brand-500 text-white shadow-sm'  : 'bg-slate-50 dark:bg-slate-700/50 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200' }⁠;
-badge.innerHTML = ⁠<span class="truncate">${cat}</span> <span class="ml-2 px-1.5 py-0.5 text-[10px] rounded-full ${isActive ? 'bg-white/20 text-white' : 'bg-slate-200 dark:bg-slate-600 text-slate-600 dark:text-slate-300'}">${count}</span>⁠;
-badge.onclick = () => {
-activePartFilter = cat;
-renderPartCategories();
-renderPagesGrid();
-};
+badge.type = 'button';
+badge.className = `w-full px-3 py-2 rounded-lg text-xs font-medium flex items-center justify-between transition ${isActive ? 'bg-brand-500 text-white shadow-sm' : 'bg-slate-50 dark:bg-slate-700/50 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200'}`;
+const label = document.createElement('span');
+label.className = 'truncate';
+label.textContent = cat;
+const countBadge = document.createElement('span');
+countBadge.className = `ml-2 px-1.5 py-0.5 text-[10px] rounded-full ${isActive ? 'bg-white/20 text-white' : 'bg-slate-200 dark:bg-slate-600 text-slate-600 dark:text-slate-300'}`;
+countBadge.textContent = String(count);
+badge.append(label, countBadge);
+badge.addEventListener('click', () => { activePartFilter = cat; renderPartCategories(); renderPagesGrid(); });
 partCategoryList.appendChild(badge);
 });
 }
@@ -554,72 +628,80 @@ renderPartCategories();
 }
 // Cloudflare AI Worker Header Part Recognition Engine
 async function runAIRecognition() {
-if (pageList.length === 0) {
-showToast('認識する楽譜ページがありません', 'error');
-return;
-}
-showToast('Cloudflare AI Workerでパート名解析を開始中...', 'info');
+if (isRecognizing) return;
+if (pageList.length === 0) { showToast('認識する楽譜ページがありません', 'error'); return; }
+const button = document.getElementById('btn-auto-detect');
+const originalHTML = button.innerHTML;
+isRecognizing = true;
+button.disabled = true;
+button.classList.add('opacity-60', 'cursor-not-allowed');
 let detectedCount = 0;
+let failedCount = 0;
+try {
 for (let i = 0; i < pageList.length; i++) {
 const pageItem = pageList[i];
 try {
-// Extract Header Region (Top 25%) image safely
 const headerBase64 = await extractHeaderImageBase64(pageItem);
-if (!headerBase64) continue;
-// Send to Cloudflare Worker Proxy
-const response = await fetch(CLOUDFLARE_WORKER_URL, {
-method: 'POST',
-headers: { 'Content-Type': 'application/json' },
-body: JSON.stringify({ image: headerBase64 })
+if (!headerBase64) throw new Error('ヘッダー画像を作成できませんでした');
+const controller = new AbortController();
+const timeoutId = setTimeout(() => controller.abort(), 45000);
+let response;
+try {
+response = await fetch(CLOUDFLARE_WORKER_URL, {
+method: 'POST', headers: { 'Content-Type': 'application/json' },
+body: JSON.stringify({ image: headerBase64 }), signal: controller.signal
 });
-if (response.ok) {
-const data = await response.json();
-if (data.partName) {
-let part = data.partName.trim();
-// Category Auto Assignment & Creation
+} finally { clearTimeout(timeoutId); }
+const payload = await response.json().catch(() => ({}));
+if (!response.ok) throw new Error(payload.details || payload.error || `Worker error: ${response.status}`);
+const part = String(payload.partName || '').replace(/[\u0000-\u001f]/g, '').trim().replace(/^['\"]|['\"]$/g, '').slice(0, 80);
+if (!part) throw new Error('パート名を読み取れませんでした');
 let matched = partCategories.find(c => c.toLowerCase() === part.toLowerCase());
-if (!matched) {
-// Add new custom part category automatically
-partCategories.splice(partCategories.length - 1, 0, part);
-matched = part;
-}
+if (!matched) { partCategories.splice(Math.max(1, partCategories.length - 1), 0, part); matched = part; }
 pageItem.partName = matched;
 detectedCount++;
-}
-}
 } catch (err) {
-console.error('AI Recognition Error on page', i + 1, err);
+failedCount++;
+console.error(`AI recognition failed on page ${i + 1}:`, err);
 }
+if ((i + 1) % 5 === 0 || i === pageList.length - 1) showToast(`AI認識中 ${i + 1}/${pageList.length}ページ`, 'info');
 }
 renderPartCategories();
 renderPagesGrid();
-showToast(⁠自動パート認識が完了しました (${detectedCount} ページ割り当て)⁠, 'success');
+showToast(`AI認識完了：${detectedCount}ページ成功${failedCount ? `、${failedCount}ページ失敗` : ''}`, failedCount ? 'error' : 'success');
+} finally {
+isRecognizing = false;
+button.disabled = false;
+button.classList.remove('opacity-60', 'cursor-not-allowed');
+button.innerHTML = originalHTML;
+if (window.lucide) lucide.createIcons();
+}
 }
 // Extract Top Header Image Area lightweight (JPEG Base64)
 async function extractHeaderImageBase64(pageItem) {
+let pdfDoc = null;
+let page = null;
+let canvas = null;
 try {
-const pdfDoc = await pdfjsLib.getDocument({ data: new Uint8Array(pageItem.pdfBuffer) }).promise;
-const page = await pdfDoc.getPage(pageItem.pageNum);
-const viewport = page.getViewport({ scale: 1.0 });
-const canvas = document.createElement('canvas');
-const ctx = canvas.getContext('2d');
-// Scale down for ultra fast transmission
-const targetWidth = 800;
-const scale = targetWidth / viewport.width;
-const scaledViewport = page.getViewport({ scale: scale });
-canvas.width = scaledViewport.width;
-canvas.height = Math.floor(scaledViewport.height * 0.28); // Top 28% header area only
-await page.render({
-canvasContext: ctx,
-viewport: scaledViewport
-}).promise;
-const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
-page.cleanup();
-pdfDoc.destroy();
-return dataUrl.replace(/^data:image/jpeg;base64,/, '');
-} catch (e) {
-console.error('Header extraction error:', e);
+pdfDoc = await pdfjsLib.getDocument({ data: new Uint8Array(pageItem.pdfBuffer.slice(0)) }).promise;
+page = await pdfDoc.getPage(pageItem.pageNum);
+const viewport = page.getViewport({ scale: 1 });
+const scale = Math.min(1.5, 800 / viewport.width);
+const scaledViewport = page.getViewport({ scale });
+canvas = document.createElement('canvas');
+canvas.width = Math.max(1, Math.ceil(scaledViewport.width));
+canvas.height = Math.max(1, Math.floor(scaledViewport.height * 0.28));
+const ctx = canvas.getContext('2d', { alpha: false });
+if (!ctx) throw new Error('Canvasを初期化できません');
+await page.render({ canvasContext: ctx, viewport: scaledViewport }).promise;
+return canvas.toDataURL('image/jpeg', 0.72).replace(/^data:image\/jpeg;base64,/, '');
+} catch (err) {
+console.error('Header extraction error:', err);
 return null;
+} finally {
+if (page) { try { page.cleanup(); } catch (_) {} }
+if (pdfDoc) { try { await pdfDoc.destroy(); } catch (_) {} }
+if (canvas) { canvas.width = 0; canvas.height = 0; }
 }
 }
 // A3 Spread Splitting (pdfsplit.shotaste style)
@@ -664,7 +746,7 @@ newPageList.push(p);
 pageList = newPageList;
 renderPagesGrid();
 renderPartCategories();
-showToast(⁠${splitCount} 枚の見開き楽譜を分割しました⁠, 'success');
+showToast(`${splitCount} 枚の見開き楽譜を分割しました`, 'success');
 }
 // Crop Modal Controls
 function cropPage(id) {
@@ -672,20 +754,33 @@ activeCropPageIndex = pageList.findIndex(p => p.id === id);
 if (activeCropPageIndex === -1) return;
 const pageItem = pageList[activeCropPageIndex];
 document.getElementById('crop-modal').classList.remove('hidden');
+activeCropSelection = null;
 // Draw page on crop canvas
 renderCropCanvas(pageItem);
 }
 async function renderCropCanvas(pageItem) {
 const canvas = document.getElementById('crop-canvas');
-const pdfDoc = await pdfjsLib.getDocument({ data: new Uint8Array(pageItem.pdfBuffer) }).promise;
-const page = await pdfDoc.getPage(pageItem.pageNum);
+let pdfDoc = null;
+let page = null;
+try {
+pdfDoc = await pdfjsLib.getDocument({ data: new Uint8Array(pageItem.pdfBuffer.slice(0)) }).promise;
+page = await pdfDoc.getPage(pageItem.pageNum);
 const viewport = page.getViewport({ scale: 0.8 });
-canvas.width = viewport.width;
-canvas.height = viewport.height;
-const ctx = canvas.getContext('2d');
-await page.render({ canvasContext: ctx, viewport: viewport }).promise;
-page.cleanup();
-pdfDoc.destroy();
+canvas.width = Math.ceil(viewport.width);
+canvas.height = Math.ceil(viewport.height);
+const ctx = canvas.getContext('2d', { alpha: false });
+await page.render({ canvasContext: ctx, viewport }).promise;
+const overlay = document.getElementById('crop-overlay');
+overlay.classList.add('hidden');
+activeCropSelection = null;
+cropDragStart = null;
+} catch (err) {
+console.error('Crop preview error:', err);
+showToast('トリミング画面を表示できませんでした', 'error');
+} finally {
+if (page) { try { page.cleanup(); } catch (_) {} }
+if (pdfDoc) { try { await pdfDoc.destroy(); } catch (_) {} }
+}
 }
 function closeCropModal() {
 document.getElementById('crop-modal').classList.add('hidden');
@@ -700,15 +795,15 @@ return;
 }
 showToast('PDFを作成中...', 'info');
 try {
-const mergedPdf = await pdfLib.PDFDocument.create();
+const mergedPdf = await PDFLib.PDFDocument.create();
 for (let i = 0; i < filteredPages.length; i++) {
 const pageItem = filteredPages[i];
-const srcDoc = await pdfLib.PDFDocument.load(pageItem.pdfBuffer);
+const srcDoc = await PDFLib.PDFDocument.load(pageItem.pdfBuffer.slice(0));
 const [copiedPage] = await mergedPdf.copyPages(srcDoc, [pageItem.pageNum - 1]);
 // Apply Rotation
 if (pageItem.rotation) {
 const currentRot = copiedPage.getRotation().angle;
-copiedPage.setRotation(pdfLib.degrees(currentRot + pageItem.rotation));
+copiedPage.setRotation(PDFLib.degrees(currentRot + pageItem.rotation));
 }
 // Apply CropBox if defined
 if (pageItem.cropBox) {
@@ -723,7 +818,7 @@ mergedPdf.addPage(copiedPage);
 }
 const pdfBytes = await mergedPdf.save();
 const blob = new Blob([pdfBytes], { type: 'application/pdf' });
-saveAs(blob, ⁠楽譜_${activePartFilter}_${Date.now()}.pdf⁠);
+saveAs(blob, `楽譜_${activePartFilter}_${Date.now()}.pdf`);
 showToast('PDFを出力しました', 'success');
 } catch (err) {
 console.error('PDF Export Error:', err);
@@ -746,14 +841,14 @@ if (!partGroups[p.partName]) partGroups[p.partName] = [];
 partGroups[p.partName].push(p);
 });
 for (const [partName, pages] of Object.entries(partGroups)) {
-const partPdf = await pdfLib.PDFDocument.create();
+const partPdf = await PDFLib.PDFDocument.create();
 for (let i = 0; i < pages.length; i++) {
 const pageItem = pages[i];
-const srcDoc = await pdfLib.PDFDocument.load(pageItem.pdfBuffer);
+const srcDoc = await PDFLib.PDFDocument.load(pageItem.pdfBuffer.slice(0));
 const [copiedPage] = await partPdf.copyPages(srcDoc, [pageItem.pageNum - 1]);
 if (pageItem.rotation) {
 const currentRot = copiedPage.getRotation().angle;
-copiedPage.setRotation(pdfLib.degrees(currentRot + pageItem.rotation));
+copiedPage.setRotation(PDFLib.degrees(currentRot + pageItem.rotation));
 }
 if (pageItem.cropBox) {
 copiedPage.setCropBox(
@@ -766,10 +861,10 @@ pageItem.cropBox.height
 partPdf.addPage(copiedPage);
 }
 const pdfBytes = await partPdf.save();
-zip.file(⁠${partName}.pdf⁠, pdfBytes);
+zip.file(`${partName}.pdf`, pdfBytes);
 }
 const zipBlob = await zip.generateAsync({ type: 'blob' });
-saveAs(zipBlob, ⁠楽譜パート分割_${Date.now()}.zip⁠);
+saveAs(zipBlob, `楽譜パート分割_${Date.now()}.zip`);
 showToast('パート別ZIPパッケージを出力しました', 'success');
 } catch (err) {
 console.error('ZIP Export Error:', err);
