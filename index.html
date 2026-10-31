@@ -647,7 +647,7 @@ try {
 const headerBase64 = await extractHeaderImageBase64(pageItem);
 if (!headerBase64) throw new Error('ヘッダー画像を作成できませんでした');
 const controller = new AbortController();
-const timeoutId = setTimeout(() => controller.abort(), 45000);
+const timeoutId = setTimeout(() => controller.abort(), 65000);
 let response;
 try {
 response = await fetch(CLOUDFLARE_WORKER_URL, {
