@@ -360,12 +360,15 @@ document.getElementById('btn-cancel-crop').addEventListener('click', closeCropMo
 const cropCanvas = document.getElementById('crop-canvas');
 const cropOverlay = document.getElementById('crop-overlay');
 const updateCropOverlay = (x, y, w, h) => {
+const rect = cropCanvas.getBoundingClientRect();
+const scaleX = rect.width / Math.max(1, cropCanvas.width);
+const scaleY = rect.height / Math.max(1, cropCanvas.height);
 cropOverlay.classList.remove('hidden');
 cropOverlay.style.pointerEvents = 'none';
-cropOverlay.style.left = `${Math.min(x, x + w)}px`;
-cropOverlay.style.top = `${Math.min(y, y + h)}px`;
-cropOverlay.style.width = `${Math.abs(w)}px`;
-cropOverlay.style.height = `${Math.abs(h)}px`;
+cropOverlay.style.left = `${Math.min(x, x + w) * scaleX}px`;
+cropOverlay.style.top = `${Math.min(y, y + h) * scaleY}px`;
+cropOverlay.style.width = `${Math.abs(w) * scaleX}px`;
+cropOverlay.style.height = `${Math.abs(h) * scaleY}px`;
 };
 cropCanvas.addEventListener('pointerdown', (e) => {
 const r = cropCanvas.getBoundingClientRect();
