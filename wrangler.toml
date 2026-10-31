@@ -1,0 +1,5 @@
+name = "sheet-music-parser"
+main = "worker/index.js"
+compatibility_date = "2026-11-01"
+
+# Secret values must be configured with Cloudflare, not committed here.
