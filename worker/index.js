@@ -222,10 +222,34 @@ export default {
     }
 
     if (!upstream.ok) {
-      // Do not return provider response bodies: they can contain internal diagnostic details.
+      // Return only a short, sanitized provider message to help diagnose 4xx errors.
+      let providerMessage = "";
+      try {
+        const providerBody = await upstream.text();
+        let parsed;
+        try { parsed = JSON.parse(providerBody); } catch { parsed = null; }
+        const candidate =
+          parsed?.detail ||
+          parsed?.message ||
+          parsed?.error?.message ||
+          parsed?.error?.detail ||
+          parsed?.title ||
+          "";
+        if (typeof candidate === "string") {
+          providerMessage = candidate
+            .replace(/Bearer\\s+\\S+/gi, "Bearer [redacted]")
+            .replace(/(api[_-]?key|token|secret)\\s*[:=]\\s*[^\\s,;]+/gi, "$1=[redacted]")
+            .replace(/[\\r\\n\\t]+/g, " ")
+            .trim()
+            .slice(0, 240);
+        }
+      } catch {
+        providerMessage = "";
+      }
       return jsonResponse({
         error: "NVIDIA API returned an error",
         upstreamStatus: upstream.status,
+        details: providerMessage || "NVIDIA側のエラー詳細を取得できませんでした",
         requestId
       }, 502, origin);
     }
