@@ -647,7 +647,7 @@ catch (error) { paddleOcrPromise = null; throw error; }
 }
 function identifyPartFromOcr(items) {
 const lines = (Array.isArray(items) ? items : [])
-.filter(item => item && typeof item.text === "string" && Number(item.score ?? 0) >= 0.12)
+.filter(item => item && typeof item.text === "string" && Number(item.score ?? 0) >= 0.08)
 .sort((a, b) => {
 const ay = Array.isArray(a.poly) ? a.poly.reduce((n, p) => n + (p?.[1] || 0), 0) / a.poly.length : 0;
 const by = Array.isArray(b.poly) ? b.poly.reduce((n, p) => n + (p?.[1] || 0), 0) / b.poly.length : 0;
@@ -665,13 +665,13 @@ const rules = [
 ["Flute", /flute|フルート/i],
 ["Oboe", /oboe|オーボエ/i],
 ["English Horn", /english\s*horn|cor\s*anglais|イングリッシュホルン/i],
-["Clarinet", /clarinet|クラリネット/i],
 ["Bass Clarinet", /bass\s*clarinet|バスクラリネット/i],
+["Clarinet", /clarinet|クラリネット/i],
 ["Bassoon", /bassoon|ファゴット/i],
-["Saxophone", /saxophone|サクソフォン|サックス/i],
+["Saxophone", /saxophone|soprano\s*sax|alto\s*sax|tenor\s*sax|baritone\s*sax|サクソフォン|サックス/i],
 ["Horn", /french\s*horn|ホルン/i],
 ["Trumpet", /trumpet|トランペット/i],
-["Trombone", /trombone|トロンボーン/i],
+["Trombone", /trombone|trombone\s*[1-9]|トロンボーン/i],
 ["Euphonium", /euphonium|ユーフォニアム/i],
 ["Tuba", /tuba|チューバ/i],
 ["Violin", /violin|ヴァイオリン|バイオリン/i],
@@ -684,10 +684,7 @@ const rules = [
 ["Harp", /harp|ハープ/i]
 ];
 for (const [category, pattern] of rules) {
-if (!pattern.test(allText)) continue;
-const line = lines.find(text => pattern.test(text));
-if (line && line.length <= 80) return line;
-return category;
+if (pattern.test(allText)) return category;
 }
 return "";
 }
