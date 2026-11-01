@@ -9,8 +9,8 @@ const ALLOWED_ORIGINS = new Set([
   "http://127.0.0.1:5173"
 ]);
 
-const MAX_JSON_BYTES = 7 * 1024 * 1024;
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const MAX_JSON_BYTES = 12 * 1024 * 1024;
+const MAX_PDF_BYTES = 8 * 1024 * 1024;
 const GEMINI_TIMEOUT_MS = 55000;
 
 function corsHeaders(origin) {
@@ -67,31 +67,20 @@ async function readTextWithLimit(request, maxBytes) {
   return new TextDecoder().decode(merged);
 }
 
-function parseImage(value) {
+function parsePdf(value) {
   if (typeof value !== "string" || !value.trim()) {
-    throw new Error("IMAGE_REQUIRED");
+    throw new Error("PDF_REQUIRED");
   }
-
-  let mime = "image/jpeg";
-  let base64 = value.trim();
-  const dataUriMatch = base64.match(/^data:(image\/(?:jpeg|png|webp));base64,([\s\S]+)$/i);
-  if (dataUriMatch) {
-    mime = dataUriMatch[1].toLowerCase();
-    base64 = dataUriMatch[2];
-  }
-
-  base64 = base64.replace(/\s/g, "");
+  const base64 = value.replace(/\\s/g, "");
   if (!base64 || base64.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(base64)) {
-    throw new Error("INVALID_IMAGE_BASE64");
+    throw new Error("INVALID_PDF_BASE64");
   }
-
   const estimatedBytes = Math.floor((base64.length * 3) / 4) -
     (base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0);
-  if (estimatedBytes <= 0 || estimatedBytes > MAX_IMAGE_BYTES) {
-    throw new Error("IMAGE_TOO_LARGE");
+  if (estimatedBytes <= 0 || estimatedBytes > MAX_PDF_BYTES) {
+    throw new Error("PDF_TOO_LARGE");
   }
-
-  return { mime, base64, dataUri: `data:${mime};base64,${base64}` };
+  return { base64, estimatedBytes };
 }
 
 function cleanPartName(value) {
@@ -157,31 +146,34 @@ export default {
       }, tooLarge ? 413 : 400, origin);
     }
 
-    let image;
-    let headerImage = null;
+    let pdf;
     try {
-      image = parseImage(payload?.image);
-      if (payload?.headerImage) headerImage = parseImage(payload.headerImage);
+      pdf = parsePdf(payload?.pdf);
     } catch (error) {
       const messages = {
-        IMAGE_REQUIRED: "Image data is required",
-        INVALID_IMAGE_BASE64: "Image must be valid Base64 image data",
-        IMAGE_TOO_LARGE: "Image exceeds the 5 MB limit"
+        PDF_REQUIRED: "PDF data is required",
+        INVALID_PDF_BASE64: "PDF must be valid Base64 data",
+        PDF_TOO_LARGE: "Single-page PDF exceeds the 8 MB limit"
       };
       return jsonResponse({
-        error: messages[error.message] || "Invalid image data",
+        error: messages[error.message] || "Invalid PDF data",
         requestId
       }, 400, origin);
     }
 
+    const requestedPage = Number(payload?.pageNumber);
+    const pageLabel = Number.isInteger(requestedPage) && requestedPage > 0
+      ? String(requestedPage)
+      : "unknown";
+
     const prompt = [
-      "You are identifying the instrument or part name printed in the header of a sheet-music page.",
-      "You will receive a full sheet-music page and, if available, a separate enlarged crop of the top 30 percent of that same page.",
-      "The enlarged header crop is provided specifically to make small printed instrument labels readable. Examine it carefully, especially the upper-left corner.",
-      "Find the instrument or part name printed on the page. Do not answer UNKNOWN merely because the text is small; inspect the enlarged crop and infer the clearly readable instrument name.",
+      "You are identifying the instrument or part name printed in the header of a sheet-music PDF page.",
+      "The attached document is the original one-page PDF, not a screenshot. Read both its embedded text and its visual layout.",
+      "Find the printed instrument or part label, especially near the upper-left corner and page header.",
       "Ignore composition title, composer, publisher, copyright, watermark, and red publisher stamps. The part label may be immediately beside or below a publisher mark.",
       "Example: 'C Trombone' means return exactly 'Trombone'. Keep meaningful part numbers such as 'Clarinet 2' or 'Violin I'.",
-      "If you can read any part of the label, return the best supported instrument or part name. Use UNKNOWN only if the label truly cannot be read.",
+      "If the label contains a transposing key or instrument notation, return the instrument name only.",
+      "Do not answer UNKNOWN if any readable label is present. If multiple labels exist, choose the one identifying this part rather than the full score.",
       "Output only the instrument or part name, without explanation."
     ].join(" ");
 
@@ -201,13 +193,8 @@ export default {
           contents: [{
             role: "user",
             parts: [
-              { text: prompt },
-              { text: "FULL PAGE:" },
-              { inline_data: { mime_type: image.mime, data: image.base64 } },
-              ...(headerImage ? [
-                { text: "ENLARGED HEADER CROP — inspect this closely for the part label:" },
-                { inline_data: { mime_type: headerImage.mime, data: headerImage.base64 } }
-              ] : [])
+              { inline_data: { mime_type: "application/pdf", data: pdf.base64 } },
+              { text: prompt + " This is source PDF page " + pageLabel + "." }
             ]
           }],
           generationConfig: {
