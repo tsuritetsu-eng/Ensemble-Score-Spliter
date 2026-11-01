@@ -168,8 +168,8 @@ export default {
       "Flute; Piccolo; Oboe; English Horn; Bassoon; E♭ Clarinet; B♭ Clarinet; Alto Clarinet; Bass Clarinet; Contrabass Clarinet; Soprano Saxophone; Alto Saxophone; Tenor Saxophone; Baritone Saxophone; Trumpet; Cornet; Flugelhorn; French Horn; Trombone; Bass Trombone; Euphonium; Tuba; Double Bass; Glockenspiel; Xylophone; Marimba; Vibraphone; Tubular Bells; Timpani; Snare Drum; Bass Drum; Crash Cymbals; Suspended Cymbal; Tambourine; Triangle; Tam-tam; Wood Block; Castanets; Shaker; Drum Set; Piano; Harp; Electric Bass.",
       "Recognize common abbreviations and variants: Fl., Picc., Ob., E.H., Bsn., E♭ Cl., B♭ Cl., A.Cl., B.Cl., C.B.Cl., S.Sax., A.Sax., T.Sax., B.Sax., Tpt., Tp., Cnt., Flg., Hn., Tbn., Trb., B.Tbn., B.Trb., Euph., Tub., C.B., St.Bass, Glock., Xyl., Mar., Vib., Timp., S.D., B.D., Cym., Sus.Cym., Tamb., Tri., Pf., Hp., E.Bass.",
       "Ignore transposing-key prefixes such as C, B♭, E♭ when they precede an instrument name. Keep the instrument classification canonical and omit part numbers such as 1, 2, 3, or 4.",
-      "If the text is slightly blurred or partially unreadable, use the closest matching instrument from the list based on visible letters and musical context. Do not guess based only on the composition title.",
-      "If a readable instrument label cannot be distinguished even approximately, output UNKNOWN. Output exactly one canonical list item or UNKNOWN, with no explanation."
+      "The printed part label is expected to be one of the instruments in this list. Even if the label is faint, cropped, abbreviated, or partly unreadable, choose the single closest matching instrument using the visible letter shapes and abbreviation patterns. Do not require a perfect spelling.",
+      "Do not output UNKNOWN merely because the text is abbreviated or blurry. Output UNKNOWN only if there is no plausible instrument/part label visible anywhere in the image. Output exactly one canonical list item or UNKNOWN, with no explanation."
     ].join(" ");
 
     const controller = new AbortController();
