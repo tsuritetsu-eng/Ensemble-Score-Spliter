@@ -670,12 +670,13 @@ function normalizeAiPartName(value) {
   }
   return "";
 }
-async function requestGeminiPart(imageBlob) {
+async function requestGeminiPart(imageBlob, headerBlob) {
   const image = await blobToDataUrl(imageBlob);
+  const headerImage = headerBlob ? await blobToDataUrl(headerBlob) : "";
   const response = await fetch(GEMINI_WORKER_URL + "/", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ image })
+    body: JSON.stringify({ image, headerImage })
   });
   let data = {};
   try { data = await response.json(); } catch (_) {}
@@ -713,7 +714,8 @@ async function runAIRecognition() {
         showToast(`Gemini AIで認識中 ${i + 1}/${pageList.length}ページ`, 'info');
         const pageBlob = await extractPageImageBlob(pageItem);
         if (!pageBlob || pageBlob.size === 0) throw new Error('ページ画像を作成できませんでした');
-        const part = await requestGeminiPart(pageBlob);
+        const headerBlob = await extractPageHeaderBlob(pageItem);
+        const part = await requestGeminiPart(pageBlob, headerBlob);
         if (!part) throw new Error('AIが楽器名・パート名を特定できませんでした');
         let matched = partCategories.find(c => c.toLowerCase() === part.toLowerCase());
         if (!matched) {
