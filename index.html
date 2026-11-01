@@ -123,7 +123,7 @@ transition: transform 0.15s ease;
 <span class="text-[10px] font-bold px-1.5 py-0.5 bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 rounded">端末内OCR</span>
 </div>
 <p class="text-xs text-slate-500 dark:text-slate-400 mb-3">
-各ページ左上の楽器名欄を優先して端末内OCRで読み取ります。ロゴや曲名など別の文字から誤分類しないよう、楽器名欄で判定できないページは未分類にします。画像やPDFは外部サーバーへ送信しません。
+各ページOCRで読み取った楽器名を登録済みの楽器名・略称と照合し、文字の欠けや誤認識も近似判定します。候補が曖昧な場合は誤分類を避けて未分類にします。画像やPDFは外部サーバーへ送信しません。
 </p>
 <button id="btn-auto-detect" class="w-full py-2.5 px-4 bg-amber-500 hover:bg-amber-600 text-white font-medium text-sm rounded-lg shadow-sm flex items-center justify-center space-x-2 transition">
 <i data-lucide="scan-line" class="w-4 h-4"></i>
@@ -647,7 +647,7 @@ async function recognizePartWithOcr(worker, pageItem) {
     if (part) return { part, text, confidence: result.data.confidence || 0, region: i + 1 };
   }
   const combined = readings.filter(Boolean).join(' / ');
-  throw new Error('左上の楽器名欄を判読できませんでした。誤分類を避けるため未分類にしています' + (combined ? '。OCR文字:「' + combined.slice(0, 140) + '」' : ''));
+  throw new Error('楽器名を判読・候補照合できませんでした。誤分類を避けるため未分類にしています' + (combined ? '。OCR文字:「' + combined.slice(0, 140) + '」' : ''));
 }
 
 function normalizeAiPartName(value) {
@@ -702,6 +702,100 @@ function normalizeAiPartName(value) {
   for (const [category, pattern] of rules) {
     if (pattern.test(text)) return category;
   }
+
+  // OCRの読み間違い・文字欠けを、登録済み楽器名と略称に対して曖昧一致させる。
+  // 誤分類を避けるため、十分な一致度と次点候補との差の両方を要求する。
+  const aliases = [
+    ["Full Score", ["full score", "fullscore", "conductor", "score"]],
+    ["Contrabass Clarinet", ["contrabass clarinet", "contrabass cl", "cb cl", "c b cl"]],
+    ["Bass Clarinet", ["bass clarinet", "bass cl", "b cl"]],
+    ["Alto Clarinet", ["alto clarinet", "alto cl", "a cl"]],
+    ["E♭ Clarinet", ["eb clarinet", "e flat clarinet", "eb cl", "e flat cl"]],
+    ["B♭ Clarinet", ["bb clarinet", "b flat clarinet", "bb cl", "b flat cl", "clarinet", "cl"]],
+    ["English Horn", ["english horn", "cor anglais", "eh"]],
+    ["Bassoon", ["bassoon", "bsn"]],
+    ["Piccolo", ["piccolo", "picc"]],
+    ["Flute", ["flute", "fl"]],
+    ["Oboe", ["oboe", "ob"]],
+    ["Soprano Saxophone", ["soprano saxophone", "soprano sax", "s sax"]],
+    ["Alto Saxophone", ["alto saxophone", "alto sax", "a sax"]],
+    ["Tenor Saxophone", ["tenor saxophone", "tenor sax", "t sax"]],
+    ["Baritone Saxophone", ["baritone saxophone", "baritone sax", "b sax"]],
+    ["Bass Trombone", ["bass trombone", "bass tbn", "bass trb", "b tbn", "b trb"]],
+    ["Trombone", ["trombone", "tbn", "trb"]],
+    ["Trumpet", ["trumpet", "tpt", "tp"]],
+    ["Cornet", ["cornet", "cnt"]],
+    ["Flugelhorn", ["flugelhorn", "flugel horn", "flg"]],
+    ["French Horn", ["french horn", "f horn", "horn"]],
+    ["Euphonium", ["euphonium", "euph"]],
+    ["Tuba", ["tuba", "tub"]],
+    ["Double Bass", ["double bass", "contrabass", "string bass", "cb"]],
+    ["Glockenspiel", ["glockenspiel", "glock"]],
+    ["Xylophone", ["xylophone", "xyl"]],
+    ["Marimba", ["marimba", "mar"]],
+    ["Vibraphone", ["vibraphone", "vib"]],
+    ["Tubular Bells", ["tubular bells", "tubular bell", "chimes"]],
+    ["Timpani", ["timpani", "timp"]],
+    ["Snare Drum", ["snare drum", "snare", "sd"]],
+    ["Bass Drum", ["bass drum", "bd"]],
+    ["Suspended Cymbal", ["suspended cymbal", "sus cym"]],
+    ["Crash Cymbals", ["crash cymbals", "crash cymbal", "cymbals", "cym"]],
+    ["Tambourine", ["tambourine", "tamb"]],
+    ["Triangle", ["triangle", "tri"]],
+    ["Tam-tam", ["tam tam", "gong"]],
+    ["Wood Block", ["wood block"]],
+    ["Castanets", ["castanets"]],
+    ["Shaker", ["shaker", "maracas"]],
+    ["Drum Set", ["drum set", "drums"]],
+    ["Piano", ["piano", "pf"]],
+    ["Harp", ["harp", "hp"]],
+    ["Electric Bass", ["electric bass", "e bass"]]
+  ];
+  const compact = value => String(value || "").toLowerCase()
+    .replace(/[♭]/g, "b").replace(/[♯]/g, "sharp")
+    .replace(/[^a-z0-9]/g, "");
+  const levenshtein = (a, b) => {
+    const row = Array.from({ length: b.length + 1 }, (_, i) => i);
+    for (let i = 1; i <= a.length; i++) {
+      let prev = row[0];
+      row[0] = i;
+      for (let j = 1; j <= b.length; j++) {
+        const saved = row[j];
+        row[j] = Math.min(row[j] + 1, row[j - 1] + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1));
+        prev = saved;
+      }
+    }
+    return row[b.length];
+  };
+  const similarity = (a, b) => {
+    if (!a || !b) return 0;
+    if (a === b) return 1;
+    return 1 - levenshtein(a, b) / Math.max(a.length, b.length);
+  };
+  const source = compact(text);
+  if (!source) return "";
+  const words = text.toLowerCase().match(/[a-z]+/g) || [];
+  const windows = [source];
+  for (let size = 1; size <= Math.min(4, words.length); size++) {
+    for (let i = 0; i + size <= words.length; i++) windows.push(compact(words.slice(i, i + size).join(" ")));
+  }
+  // "Bass" が残っている場合、Trombone部分の誤読でも Bass Trombone を優先する。
+  const hasBass = /\\bbass\\b|\\bbassoon\\b/i.test(text);
+  const scores = aliases.map(([category, names]) => {
+    let score = 0;
+    for (const alias of names) {
+      const target = compact(alias);
+      for (const candidate of windows) {
+        score = Math.max(score, similarity(candidate, target));
+      }
+    }
+    if (category === "Bass Trombone" && hasBass) score = Math.max(score, 0.94);
+    if (category === "Trombone" && hasBass) score = Math.min(score, 0.55);
+    return { category, score };
+  }).sort((a, b) => b.score - a.score);
+  const best = scores[0];
+  const second = scores[1];
+  if (best && best.score >= 0.82 && (!second || best.score - second.score >= 0.07)) return best.category;
   return "";
 }
 async function createSinglePagePdfBase64(pageItem) {
