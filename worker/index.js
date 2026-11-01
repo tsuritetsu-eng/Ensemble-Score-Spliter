@@ -174,10 +174,11 @@ export default {
 
     const prompt = [
       "You are identifying the instrument or part name printed in the header of a sheet-music page.",
-      "Read only the visible header text in the supplied image.",
-      "Return only the part or instrument name, preserving useful qualifiers and numbering, such as 'Flute', 'Bb Clarinet 2', 'Violin I', or 'Full Score'.",
-      "Do not describe the image. Do not guess if the header is unreadable; return exactly UNKNOWN.",
-      "Output plain text only, with no quotation marks or explanation."
+      "The image is a complete sheet-music page. The part label may be small and may appear in the upper-left area near a publisher stamp or title.",
+      "Inspect the entire page, especially the upper-left header. Read the printed instrument or part label, not the composition title, composer, publisher, or watermark.",
+      "For example, if the header says 'C Trombone', return exactly 'Trombone'. Preserve meaningful part numbers or section labels.",
+      "If the label is visible but partly obscured, use the readable text. Return UNKNOWN only if no instrument or part label can be determined.",
+      "Output only the instrument or part name, without explanation."
     ].join(" ");
 
     const controller = new AbortController();
@@ -265,12 +266,18 @@ export default {
     const partName = cleanPartName(rawText);
 
     if (!partName || partName.toUpperCase() === "UNKNOWN") {
+      const candidate = result?.candidates?.[0] || {};
       return jsonResponse({
         partName: "",
         recognized: false,
-        message: "Header text could not be identified",
+        message: "Geminiは楽器名を返しませんでした",
         model: GEMINI_MODEL,
-        requestId
+        requestId,
+        debug: {
+          rawText: rawText.slice(0, 120),
+          finishReason: candidate.finishReason || null,
+          promptBlocked: Boolean(result?.promptFeedback?.blockReason)
+        }
       }, 200, origin);
     }
 
