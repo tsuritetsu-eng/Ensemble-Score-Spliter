@@ -317,6 +317,7 @@ let activeThumbnailRenders = 0;
 const thumbnailQueue = [];
 const MAX_THUMBNAIL_RENDERS = 2;
 let isRecognizing = false;
+let spreadPositionPercent = 50;
 // DOM Elements
 const dropZone = document.getElementById('drop-zone');
 const emptyState = document.getElementById('empty-state');
@@ -386,7 +387,6 @@ setupEnsembleSelector();
 // Spread Splitting
 document.getElementById('btn-split-selected-spread').addEventListener('click', () => splitSpreads(true));
 document.getElementById('btn-split-all-spreads').addEventListener('click', () => splitSpreads(false));
-let spreadPositionPercent = 50;
 const spreadPositionInput = document.getElementById('spread-position');
 const spreadPositionLabel = document.getElementById('spread-position-label');
 function setSpreadPosition(value) {
