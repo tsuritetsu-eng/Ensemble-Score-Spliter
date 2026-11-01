@@ -780,11 +780,12 @@ function normalizeAiPartName(value) {
     for (let i = 0; i + size <= words.length; i++) windows.push(compact(words.slice(i, i + size).join(" ")));
   }
   // "Bass" が残っている場合、Trombone部分の誤読でも Bass Trombone を優先する。
-  const hasBass = /\\bbass\\b|\\bbassoon\\b/i.test(text);
+  const hasBass = /\bbass\b|\bbassoon\b/i.test(text);
   const scores = aliases.map(([category, names]) => {
     let score = 0;
     for (const alias of names) {
       const target = compact(alias);
+      if (target.length < 3) continue;
       for (const candidate of windows) {
         score = Math.max(score, similarity(candidate, target));
       }
