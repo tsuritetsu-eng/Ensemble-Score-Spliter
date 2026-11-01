@@ -10,7 +10,7 @@ const ALLOWED_ORIGINS = new Set([
 ]);
 
 const MAX_JSON_BYTES = 12 * 1024 * 1024;
-const MAX_PDF_BYTES = 8 * 1024 * 1024;
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const GEMINI_TIMEOUT_MS = 55000;
 
 function corsHeaders(origin) {
@@ -67,19 +67,15 @@ async function readTextWithLimit(request, maxBytes) {
   return new TextDecoder().decode(merged);
 }
 
-function parsePdf(value) {
-  if (typeof value !== "string" || !value.trim()) {
-    throw new Error("PDF_REQUIRED");
-  }
+function parseImage(value) {
+  if (typeof value !== "string" || !value.trim()) throw new Error("IMAGE_REQUIRED");
   const base64 = value.replace(/\\s/g, "");
   if (!base64 || base64.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(base64)) {
-    throw new Error("INVALID_PDF_BASE64");
+    throw new Error("INVALID_IMAGE_BASE64");
   }
   const estimatedBytes = Math.floor((base64.length * 3) / 4) -
     (base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0);
-  if (estimatedBytes <= 0 || estimatedBytes > MAX_PDF_BYTES) {
-    throw new Error("PDF_TOO_LARGE");
-  }
+  if (estimatedBytes <= 0 || estimatedBytes > MAX_IMAGE_BYTES) throw new Error("IMAGE_TOO_LARGE");
   return { base64, estimatedBytes };
 }
 
@@ -146,31 +142,26 @@ export default {
       }, tooLarge ? 413 : 400, origin);
     }
 
-    let pdf;
+    let image;
     try {
-      pdf = parsePdf(payload?.pdf ?? payload?.pdfBase64 ?? payload?.document ?? payload?.data);
+      image = parseImage(payload?.image ?? payload?.imageBase64 ?? payload?.imageData);
     } catch (error) {
       const messages = {
-        PDF_REQUIRED: "PDF data is required",
-        INVALID_PDF_BASE64: "PDF must be valid Base64 data",
-        PDF_TOO_LARGE: "Single-page PDF exceeds the 8 MB limit"
+        IMAGE_REQUIRED: "Header image data is required",
+        INVALID_IMAGE_BASE64: "Header image must be valid Base64 data",
+        IMAGE_TOO_LARGE: "Header image exceeds the 8 MB limit"
       };
       return jsonResponse({
-        error: messages[error.message] || "Invalid PDF data",
+        error: messages[error.message] || "Invalid image data",
         receivedFields: payload && typeof payload === "object" ? Object.keys(payload) : [],
         requestId
       }, 400, origin);
     }
 
-    const requestedPage = Number(payload?.pageNumber);
-    const pageLabel = Number.isInteger(requestedPage) && requestedPage > 0
-      ? String(requestedPage)
-      : "unknown";
-
     const prompt = [
       "You are identifying the instrument or part name printed in the header of a sheet-music PDF page.",
-      "The attached document is the original one-page PDF, not a screenshot. Read both its embedded text and its visual layout.",
-      "Find the printed instrument or part label, especially near the upper-left corner and page header.",
+      "The attached image is a high-resolution crop of the top header area of one sheet-music page.",
+      "Read the printed instrument or part label in this cropped header. Inspect small text carefully.",
       "Ignore composition title, composer, publisher, copyright, watermark, and red publisher stamps. The part label may be immediately beside or below a publisher mark.",
       "Example: 'C Trombone' means return exactly 'Trombone'. Keep meaningful part numbers such as 'Clarinet 2' or 'Violin I'.",
       "If the label contains a transposing key or instrument notation, return the instrument name only.",
@@ -194,8 +185,8 @@ export default {
           contents: [{
             role: "user",
             parts: [
-              { inline_data: { mime_type: "application/pdf", data: pdf.base64 } },
-              { text: prompt + " This is source PDF page " + pageLabel + "." }
+              { inline_data: { mime_type: "image/jpeg", data: image.base64 } },
+              { text: prompt + " This is source sheet-music page " + pageLabel + "." }
             ]
           }],
           generationConfig: {
