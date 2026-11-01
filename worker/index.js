@@ -162,14 +162,14 @@ export default {
     const pageLabel = Number.isInteger(pageNumber) && pageNumber > 0 ? String(pageNumber) : "unknown";
 
     const prompt = [
-      "You are identifying the instrument or part name printed in the header of a sheet-music PDF page.",
-      "The attached image is a high-resolution crop of the top header area of one sheet-music page.",
-      "Read the printed instrument or part label in this cropped header. Inspect small text carefully.",
-      "Ignore composition title, composer, publisher, copyright, watermark, and red publisher stamps. The part label may be immediately beside or below a publisher mark.",
-      "Example: 'C Trombone' means return exactly 'Trombone'. Keep meaningful part numbers such as 'Clarinet 2' or 'Violin I'.",
-      "If the label contains a transposing key or instrument notation, return the instrument name only.",
-      "Do not answer UNKNOWN if any readable label is present. If multiple labels exist, choose the one identifying this part rather than the full score.",
-      "Output only the instrument or part name, without explanation."
+      "You are an expert at identifying concert band and wind ensemble instrument labels on sheet music.",
+      "The attached image is a crop of the top header area of one sheet-music page. Find the printed instrument/part label, not the composition title, composer, arranger, publisher, copyright, page number, or watermark.",
+      "Classify the label into exactly ONE canonical instrument name from this closed list. Return the canonical name only; never return an abbreviation or any text outside this list:",
+      "Flute; Piccolo; Oboe; English Horn; Bassoon; E♭ Clarinet; B♭ Clarinet; Alto Clarinet; Bass Clarinet; Contrabass Clarinet; Soprano Saxophone; Alto Saxophone; Tenor Saxophone; Baritone Saxophone; Trumpet; Cornet; Flugelhorn; French Horn; Trombone; Bass Trombone; Euphonium; Tuba; Double Bass; Glockenspiel; Xylophone; Marimba; Vibraphone; Tubular Bells; Timpani; Snare Drum; Bass Drum; Crash Cymbals; Suspended Cymbal; Tambourine; Triangle; Tam-tam; Wood Block; Castanets; Shaker; Drum Set; Piano; Harp; Electric Bass.",
+      "Recognize common abbreviations and variants: Fl., Picc., Ob., E.H., Bsn., E♭ Cl., B♭ Cl., A.Cl., B.Cl., C.B.Cl., S.Sax., A.Sax., T.Sax., B.Sax., Tpt., Tp., Cnt., Flg., Hn., Tbn., Trb., B.Tbn., B.Trb., Euph., Tub., C.B., St.Bass, Glock., Xyl., Mar., Vib., Timp., S.D., B.D., Cym., Sus.Cym., Tamb., Tri., Pf., Hp., E.Bass.",
+      "Ignore transposing-key prefixes such as C, B♭, E♭ when they precede an instrument name. Keep the instrument classification canonical and omit part numbers such as 1, 2, 3, or 4.",
+      "If the text is slightly blurred or partially unreadable, use the closest matching instrument from the list based on visible letters and musical context. Do not guess based only on the composition title.",
+      "If a readable instrument label cannot be distinguished even approximately, output UNKNOWN. Output exactly one canonical list item or UNKNOWN, with no explanation."
     ].join(" ");
 
     const controller = new AbortController();
