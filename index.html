@@ -655,10 +655,37 @@ pdfDoc = await pdfjsLib.getDocument({ data: new Uint8Array(job.pageItem.pdfBuffe
 page = await pdfDoc.getPage(job.pageItem.pageNum);
 const baseViewport = page.getViewport({ scale: 1, rotation: job.pageItem.rotation || 0 });
 const viewport = page.getViewport({ scale: Math.min(0.62, 1400 / Math.max(baseViewport.width, baseViewport.height)), rotation: job.pageItem.rotation || 0 });
-const ctx = job.canvas.getContext('2d', { alpha: false });
-job.canvas.width = Math.ceil(viewport.width);
-job.canvas.height = Math.ceil(viewport.height);
-await page.render({ canvasContext: ctx, viewport }).promise;
+const renderCanvas = document.createElement('canvas');
+renderCanvas.width = Math.ceil(viewport.width);
+renderCanvas.height = Math.ceil(viewport.height);
+const renderCtx = renderCanvas.getContext('2d', { alpha: false });
+if (!renderCtx) throw new Error('プレビュー画像を初期化できません');
+await page.render({ canvasContext: renderCtx, viewport }).promise;
+if (job.pageItem.cropBox) {
+  const b = job.pageItem.cropBox;
+  const corners = [
+    viewport.convertToViewportPoint(b.x, b.y),
+    viewport.convertToViewportPoint(b.x + b.width, b.y),
+    viewport.convertToViewportPoint(b.x, b.y + b.height),
+    viewport.convertToViewportPoint(b.x + b.width, b.y + b.height)
+  ];
+  const xs = corners.map(point => point[0]), ys = corners.map(point => point[1]);
+  const left = Math.max(0, Math.floor(Math.min(...xs)));
+  const top = Math.max(0, Math.floor(Math.min(...ys)));
+  const right = Math.min(renderCanvas.width, Math.ceil(Math.max(...xs)));
+  const bottom = Math.min(renderCanvas.height, Math.ceil(Math.max(...ys)));
+  job.canvas.width = Math.max(1, right - left);
+  job.canvas.height = Math.max(1, bottom - top);
+  const ctx = job.canvas.getContext('2d', { alpha: false });
+  ctx.drawImage(renderCanvas, left, top, job.canvas.width, job.canvas.height, 0, 0, job.canvas.width, job.canvas.height);
+} else {
+  job.canvas.width = renderCanvas.width;
+  job.canvas.height = renderCanvas.height;
+  const ctx = job.canvas.getContext('2d', { alpha: false });
+  ctx.drawImage(renderCanvas, 0, 0);
+}
+renderCanvas.width = 0;
+renderCanvas.height = 0;
 } catch (err) {
 console.error('Thumbnail render error:', err);
 } finally {
