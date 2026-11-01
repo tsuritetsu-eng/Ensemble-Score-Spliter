@@ -925,8 +925,8 @@ async function extractPageLabelBlobs(pageItem) {
     // Most printed part labels sit immediately below/inside the upper-left publisher mark.
     // Two tight crops are used; no center/bottom page text is considered.
     const regions = [
-      { x: 0.02, y: 0.045, w: 0.22, h: 0.085 },
-      { x: 0.015, y: 0.035, w: 0.30, h: 0.13 }
+      { x: 0.0, y: 0.055, w: 0.16, h: 0.075 },
+      { x: 0.0, y: 0.04, w: 0.22, h: 0.11 }
     ];
     for (const region of regions) {
       const sx = Math.floor(sourceCanvas.width * region.x);
