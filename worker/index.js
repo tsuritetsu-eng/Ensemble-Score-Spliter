@@ -158,6 +158,9 @@ export default {
       }, 400, origin);
     }
 
+    const pageNumber = Number(payload?.pageNumber);
+    const pageLabel = Number.isInteger(pageNumber) && pageNumber > 0 ? String(pageNumber) : "unknown";
+
     const prompt = [
       "You are identifying the instrument or part name printed in the header of a sheet-music PDF page.",
       "The attached image is a high-resolution crop of the top header area of one sheet-music page.",
