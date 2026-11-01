@@ -635,9 +635,12 @@ function cleanOcrText(value) {
   return String(value || '').replace(/[|]/g, 'I').replace(/[：:]/g, ' ').replace(/[()（）\[\]{}]/g, ' ').replace(/\s+/g, ' ').trim();
 }
 async function recognizePartWithOcr(worker, pageItem) {
+  const embeddedText = await extractPageTextLabel(pageItem);
+  const embeddedPart = normalizeAiPartName(embeddedText);
+  if (embeddedPart) return { part: embeddedPart, text: embeddedText, confidence: 100, region: 'PDF text' };
+
   const blobs = await extractPageLabelBlobs(pageItem);
   const readings = [];
-  // 楽器名欄だけを対象にし、別の場所の文字からは分類しない。
   for (let i = 0; i < blobs.length; i++) {
     await worker.setParameters({ preserve_interword_spaces: '1', tessedit_pageseg_mode: '6', user_defined_dpi: '300' });
     const result = await worker.recognize(blobs[i]);
@@ -650,12 +653,27 @@ async function recognizePartWithOcr(worker, pageItem) {
   throw new Error('楽器名を判読・候補照合できませんでした。誤分類を避けるため未分類にしています' + (combined ? '。OCR文字:「' + combined.slice(0, 140) + '」' : ''));
 }
 
+async function extractPageTextLabel(pageItem) {
+  let pdfDoc = null;
+  try {
+    pdfDoc = await pdfjsLib.getDocument({ data: new Uint8Array(pageItem.pdfBuffer.slice(0)) }).promise;
+    const page = await pdfDoc.getPage(pageItem.pageNum);
+    try {
+      const content = await page.getTextContent();
+      return cleanOcrText((content.items || []).map(item => item.str || '').join(' '));
+    } finally {
+      page.cleanup();
+    }
+  } finally {
+    if (pdfDoc) { try { await pdfDoc.destroy(); } catch (_) {} }
+  }
+}
+
 function normalizeAiPartName(value) {
   if (typeof value !== "string") return "";
   // 楽器名末尾のパート番号・声部番号を除去（例: Oboe-3 / Oboe 3 / Oboe III）。
   const text = value.replace(/\s+/g, " ").trim()
-    .replace(/[\\s._-]+(?:part\\s*)?\\d+\\s*$/i, "")
-    .replace(/[\\s._-]+(?:part\\s*)?(?:II|III|IV|V|VI|VII|VIII|IX|X)\\s*$/i, "")
+    .replace(/(?:[\s._-]+(?:part[\s._-]*)?)?(?:\d+|II|III|IV|V|VI|VII|VIII|IX|X)\s*$/i, "")
     .trim();
   const rules = [
     ["Full Score", /full\s*score|conductor|総譜|指揮者用|スコア/i],
@@ -1019,11 +1037,10 @@ async function extractPageLabelBlobs(pageItem) {
     ctx.fillRect(0, 0, sourceCanvas.width, sourceCanvas.height);
     await page.render({ canvasContext: ctx, viewport }).promise;
 
-    // Most printed part labels sit immediately below/inside the upper-left publisher mark.
-    // Two tight crops are used; no center/bottom page text is considered.
+    // パート名はページ左上または上部中央に置かれるため、上部全幅を対象にする。
     const regions = [
-      { x: 0.0, y: 0.055, w: 0.16, h: 0.075 },
-      { x: 0.0, y: 0.04, w: 0.22, h: 0.11 }
+      { x: 0.02, y: 0.025, w: 0.96, h: 0.16 },
+      { x: 0.02, y: 0.0, w: 0.96, h: 0.22 }
     ];
     for (const region of regions) {
       const sx = Math.floor(sourceCanvas.width * region.x);
