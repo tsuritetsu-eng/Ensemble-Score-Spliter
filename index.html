@@ -771,48 +771,66 @@ async function runAIRecognition() {
   let detectedCount = 0;
   let failedCount = 0;
   const failureDetails = [];
+
+  // 楽器名が印刷される位置を優先。今回確認した譜面のような左上の小さな表記を先に拡大して読む。
+  async function tryImageBlob(blob, pageNumber, label) {
+    if (!blob) throw new Error(label + '画像を作成できませんでした');
+    const base64 = await blobToBase64(blob);
+    if (!base64) throw new Error(label + '画像をBase64に変換できませんでした');
+    return await requestGeminiPart(base64, pageNumber);
+  }
+
   try {
     for (let i = 0; i < pageList.length; i++) {
       const pageItem = pageList[i];
       try {
-        button.innerHTML = `<span>Gemini AI認識中 ${i + 1}/${pageList.length}</span>`;
-        showToast(`ページ全体から楽器名を探しています ${i + 1}/${pageList.length}ページ`, 'info');
         let part = '';
+        const attempts = [];
+        button.innerHTML = `<span>楽器名を拡大認識中 ${i + 1}/${pageList.length}</span>`;
+        showToast(`ページ左上の楽器名を拡大して確認しています ${i + 1}/${pageList.length}ページ`, 'info');
+
+        // 1) 左上ラベルの専用クロップを最優先で解析
         try {
-          // Do not assume the instrument label is in a fixed corner. Inspect the whole page first.
-          const fullPageBlob = await extractPageImageBlob(pageItem);
-          const fullPageBase64 = await blobToBase64(fullPageBlob);
-          if (!fullPageBase64) throw new Error('ページ全体の画像を取得できませんでした');
-          part = await requestGeminiPart(fullPageBase64, pageItem.pageNum);
-        } catch (fullPageError) {
-          const reason = String(fullPageError?.message || fullPageError);
-          if (!reason.includes('Geminiは楽器名を返しませんでした')) throw fullPageError;
-          console.info(`Page ${pageItem.pageNum}: full-page image was UNKNOWN; scanning enlarged page tiles.`);
-          button.innerHTML = `<span>拡大領域を順番に確認中 ${i + 1}/${pageList.length}</span>`;
+          part = await tryImageBlob(await extractPageHeaderBlob(pageItem), pageItem.pageNum, '左上ラベル');
+        } catch (err) {
+          attempts.push('左上: ' + String(err?.message || err));
+        }
+
+        // 2) 左上で判定できない場合はページ全体を確認
+        if (!part) {
+          button.innerHTML = `<span>ページ全体を確認中 ${i + 1}/${pageList.length}</span>`;
+          try {
+            part = await tryImageBlob(await extractPageImageBlob(pageItem), pageItem.pageNum, 'ページ全体');
+          } catch (err) {
+            attempts.push('全体: ' + String(err?.message || err));
+          }
+        }
+
+        // 3) それでも不明なら、拡大タイルを順番に確認
+        if (!part) {
+          button.innerHTML = `<span>拡大領域を確認中 ${i + 1}/${pageList.length}</span>`;
           const tileBlobs = await extractPageTileBlobs(pageItem);
-          let tileErrors = [];
-          for (let tileIndex = 0; tileIndex < tileBlobs.length; tileIndex++) {
+          for (let tileIndex = 0; tileIndex < tileBlobs.length && !part; tileIndex++) {
             try {
-              const tileBase64 = await blobToBase64(tileBlobs[tileIndex]);
-              if (!tileBase64) throw new Error('拡大領域画像を取得できませんでした');
-              part = await requestGeminiPart(tileBase64, pageItem.pageNum);
-              if (part) break;
-            } catch (tileError) {
-              tileErrors.push(String(tileError?.message || tileError));
+              part = await tryImageBlob(tileBlobs[tileIndex], pageItem.pageNum, '拡大領域 ' + (tileIndex + 1));
+            } catch (err) {
+              attempts.push('領域' + (tileIndex + 1) + ': ' + String(err?.message || err));
             }
           }
-          if (!part) throw new Error(tileErrors[tileErrors.length - 1] || 'ページ全体と拡大領域の両方で楽器名を認識できませんでした');
         }
-        if (!part) throw new Error('AIが楽器名・パート名を特定できませんでした');
-        let matched = partCategories.find(c => c.toLowerCase() === part.toLowerCase());
-        if (!matched) throw new Error("登録済みの楽器名に一致しません: " + part);
+
+        if (!part) {
+          throw new Error(attempts.slice(0, 3).join(' / ') || '楽器名を認識できませんでした');
+        }
+        const matched = partCategories.find(c => c.toLowerCase() === part.toLowerCase());
+        if (!matched) throw new Error('登録済みの楽器名に一致しません: ' + part);
         pageItem.partName = matched;
         detectedCount++;
       } catch (err) {
         failedCount++;
         const reason = err && err.message ? String(err.message) : '原因不明のエラー';
-        failureDetails.push({ page: i + 1, reason: reason.slice(0, 160) });
-        console.error(`Gemini header-image recognition failed on page ${i + 1}:`, err);
+        failureDetails.push({ page: i + 1, reason: reason.slice(0, 220) });
+        console.error('Gemini recognition failed on page ' + (i + 1) + ':', err);
       }
       if ((i + 1) % 2 === 0 || i === pageList.length - 1) {
         await new Promise(resolve => setTimeout(resolve, 100));
