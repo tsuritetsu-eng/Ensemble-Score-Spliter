@@ -199,8 +199,15 @@ export default {
       });
     } catch (error) {
       const timedOut = error?.name === "AbortError";
+      const diagnostic = String(error?.message || error || "Unknown fetch error")
+        .replace(/https?:\\/\\/[^\\s]+/gi, "[URL]")
+        .replace(/(api[_-]?key|token|secret)\\s*[:=]\\s*[^\\s,;]+/gi, "$1=[redacted]")
+        .replace(/[\\r\\n\\t]+/g, " ")
+        .slice(0, 350);
       return jsonResponse({
         error: timedOut ? "Gemini request timed out" : "Could not connect to Gemini API",
+        details: diagnostic,
+        errorName: String(error?.name || "Error").slice(0, 80),
         requestId
       }, timedOut ? 504 : 502, origin);
     } finally {
