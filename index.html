@@ -260,7 +260,7 @@ A3横長などの見開き譜面を真ん中で独立した2枚のページ（A4
 <script>
 // PDF.js Worker Init
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-// PaddleOCR.js: free, in-browser OCR (no API key or server required)
+// NVIDIA Vision AI: Cloudflare Worker proxy
 const NVIDIA_WORKER_URL = "https://sheet-music-parser.mrtsuritetsu.workers.dev";
 // State Management
 let pageList = []; // { id, originalPdfIndex, pageNum, pdfBuffer, rotation, cropBox, partName, selected, width, height }
