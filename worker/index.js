@@ -1,4 +1,5 @@
-const NVIDIA_ENDPOINT = "https://integrate.api.nvidia.com/v1/chat/completions";
+const NVIDIA_ENDPOINT = "https://integrate.api.nvidia.com/v1/meta/llama-3.2-11b-vision-instruct";
+const NVIDIA_STATUS_ENDPOINT = "https://integrate.api.nvidia.com/v1/status/";
 const NVIDIA_MODEL = "meta/llama-3.2-11b-vision-instruct";
 
 const ALLOWED_ORIGINS = new Set([
@@ -211,14 +212,65 @@ export default {
         }),
         signal: controller.signal
       });
+
+      // NVIDIA may return 202 while the inference is still running.
+      // In that case, poll the documented status endpoint until it returns 200.
+      if (upstream.status === 202) {
+        let pending;
+        try {
+          pending = await upstream.json();
+        } catch {
+          pending = null;
+        }
+        const providerRequestId = pending?.requestId || pending?.request_id;
+        if (typeof providerRequestId !== "string" || !providerRequestId) {
+          return jsonResponse({
+            error: "NVIDIA accepted the request but did not return a requestId",
+            requestId
+          }, 502, origin);
+        }
+
+        const deadline = Date.now() + NVIDIA_TIMEOUT_MS - 1000;
+        while (Date.now() < deadline) {
+          await new Promise(resolve => setTimeout(resolve, 1500));
+          const poll = await fetch(
+            NVIDIA_STATUS_ENDPOINT + encodeURIComponent(providerRequestId),
+            {
+              method: "GET",
+              headers: {
+                "Authorization": `Bearer ${env.NVIDIA_API_KEY}`,
+                "Accept": "application/json"
+              },
+              signal: controller.signal
+            }
+          );
+
+          if (poll.status === 200) {
+            upstream = poll;
+            break;
+          }
+          if (poll.status !== 202) {
+            upstream = poll;
+            break;
+          }
+          upstream = poll;
+        }
+      }
     } catch (error) {
       const timedOut = error?.name === "AbortError";
       return jsonResponse({
         error: timedOut ? "NVIDIA request timed out" : "Could not connect to NVIDIA API",
         requestId
-      }, 502, origin);
+      }, timedOut ? 504 : 502, origin);
     } finally {
       clearTimeout(timeoutId);
+    }
+
+    if (upstream.status === 202) {
+      return jsonResponse({
+        error: "NVIDIA inference is still pending after the polling limit",
+        requestId
+      }, 504, origin);
     }
 
     if (!upstream.ok) {
