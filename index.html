@@ -55,7 +55,7 @@ transition: transform 0.15s ease;
 </div>
 <div>
 <h1 class="font-bold text-lg leading-tight">PDF楽譜エディター & パート自動分割</h1>
-<p class="text-xs text-slate-500 dark:text-slate-400">AIヘッダー認識 ・ A3見開き分割 ・ パート一括抽出</p>
+<p class="text-xs text-slate-500 dark:text-slate-400">ページ全体OCR ・ A3見開き分割 ・ パート一括抽出</p>
 </div>
 </div>
 <div class="flex items-center space-x-2">
@@ -121,7 +121,7 @@ transition: transform 0.15s ease;
 <span class="text-[10px] font-bold px-1.5 py-0.5 bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400 rounded">無料・端末内OCR</span>
 </div>
 <p class="text-xs text-slate-500 dark:text-slate-400 mb-3">
-各楽譜ページ上部の文字をOCRで読み取ります。画像は外部サーバーへ送信せず、このブラウザ内で処理します（初回のみOCRモデルをダウンロード）。
+各楽譜ページの画像全体をOCRで読み取り、ページ内の楽器名・パート名を探します。画像は外部サーバーへ送信せず、このブラウザ内で処理します（初回のみOCRモデルをダウンロード）。
 </p>
 <button id="btn-auto-detect" class="w-full py-2.5 px-4 bg-amber-500 hover:bg-amber-600 text-white font-medium text-sm rounded-lg shadow-sm flex items-center justify-center space-x-2 transition">
 <i data-lucide="scan-line" class="w-4 h-4"></i>
@@ -630,7 +630,7 @@ pageList = pageList.filter(p => !p.selected);
 renderPagesGrid();
 renderPartCategories();
 }
-// Cloudflare AI Worker Header Part Recognition Engine
+// PaddleOCR.js: recognize text across the full page image
 async function getPaddleOcr() {
 if (!paddleOcrPromise) {
 paddleOcrPromise = (async () => {
@@ -709,15 +709,15 @@ const ocr = await getPaddleOcr();
 for (let i = 0; i < pageList.length; i++) {
 const pageItem = pageList[i];
 try {
-const headerBase64 = await extractHeaderImageBase64(pageItem);
-if (!headerBase64) throw new Error('ヘッダー画像を作成できませんでした');
-const binary = atob(headerBase64);
+const pageImageBase64 = await extractPageImageBase64(pageItem);
+if (!pageImageBase64) throw new Error('ページ画像を作成できませんでした');
+const binary = atob(pageImageBase64);
 const bytes = new Uint8Array(binary.length);
 for (let j = 0; j < binary.length; j++) bytes[j] = binary.charCodeAt(j);
-const headerBlob = new Blob([bytes], { type: 'image/jpeg' });
-const [ocrResult] = await ocr.predict(headerBlob, { textRecScoreThresh: 0.25 });
+const pageBlob = new Blob([bytes], { type: 'image/jpeg' });
+const [ocrResult] = await ocr.predict(pageBlob, { textRecScoreThresh: 0.25 });
 const part = identifyPartFromOcr(ocrResult?.items);
-if (!part) throw new Error('ヘッダーから楽器名・パート名を特定できませんでした');
+if (!part) throw new Error('ページ全体から楽器名・パート名を特定できませんでした');
 let matched = partCategories.find(c => c.toLowerCase() === part.toLowerCase());
 if (!matched) { partCategories.splice(Math.max(1, partCategories.length - 1), 0, part); matched = part; }
 pageItem.partName = matched;
@@ -750,8 +750,8 @@ button.innerHTML = originalHTML;
 if (window.lucide) lucide.createIcons();
 }
 }
-// Extract Top Header Image Area lightweight (JPEG Base64)
-async function extractHeaderImageBase64(pageItem) {
+// Render the entire PDF page as a JPEG image for OCR (not only the header)
+async function extractPageImageBase64(pageItem) {
 let pdfDoc = null;
 let page = null;
 let canvas = null;
@@ -759,18 +759,18 @@ try {
 pdfDoc = await pdfjsLib.getDocument({ data: new Uint8Array(pageItem.pdfBuffer.slice(0)) }).promise;
 page = await pdfDoc.getPage(pageItem.pageNum);
 const viewport = page.getViewport({ scale: 1 });
-const scale = Math.min(1.5, 800 / viewport.width);
+const scale = Math.min(2, 1400 / viewport.width);
 const scaledViewport = page.getViewport({ scale });
 canvas = document.createElement('canvas');
 canvas.width = Math.max(1, Math.ceil(scaledViewport.width));
-canvas.height = Math.max(1, Math.floor(scaledViewport.height * 0.28));
+canvas.height = Math.max(1, Math.ceil(scaledViewport.height));
 const ctx = canvas.getContext('2d', { alpha: false });
 if (!ctx) throw new Error('Canvasを初期化できません');
 await page.render({ canvasContext: ctx, viewport: scaledViewport }).promise;
-return canvas.toDataURL('image/jpeg', 0.72).replace(/^data:image\/jpeg;base64,/, '');
+return canvas.toDataURL('image/jpeg', 0.82).replace(/^data:image\\/jpeg;base64,/, '');
 } catch (err) {
-console.error('Header extraction error:', err);
-return null;
+console.error('Full page image extraction error:', err);
+throw err;
 } finally {
 if (page) { try { page.cleanup(); } catch (_) {} }
 if (pdfDoc) { try { await pdfDoc.destroy(); } catch (_) {} }
