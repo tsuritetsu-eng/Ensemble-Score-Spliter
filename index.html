@@ -265,7 +265,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs
 // Browser-side OCR; no external AI API is used.
 // State Management
 let pageList = []; // { id, originalPdfIndex, pageNum, pdfBuffer, rotation, cropBox, partName, selected, width, height }
-let partCategories = ['すべて', 'Full Score', 'Flute', 'Piccolo', 'Oboe', 'English Horn', 'Bassoon', 'E♭ Clarinet', 'B♭ Clarinet', 'Alto Clarinet', 'Bass Clarinet', 'Contrabass Clarinet', 'Soprano Saxophone', 'Alto Saxophone', 'Tenor Saxophone', 'Baritone Saxophone', 'Trumpet', 'Cornet', 'Flugelhorn', 'French Horn', 'Trombone', 'Bass Trombone', 'Euphonium', 'Tuba', 'Double Bass', 'Glockenspiel', 'Xylophone', 'Marimba', 'Vibraphone', 'Tubular Bells', 'Timpani', 'Snare Drum', 'Bass Drum', 'Crash Cymbals', 'Suspended Cymbal', 'Tambourine', 'Tam-tam', 'Wood Block', 'Castanets', 'Shaker', 'Drum Set', 'Piano', 'Harp', 'Electric Bass', '未分類'];
+let partCategories = ['すべて', 'Full Score', 'Flute', 'Piccolo', 'Oboe', 'English Horn', 'Bassoon', 'E♭ Clarinet', 'B♭ Clarinet', 'Alto Clarinet', 'Bass Clarinet', 'Contrabass Clarinet', 'Soprano Saxophone', 'Alto Saxophone', 'Tenor Saxophone', 'Baritone Saxophone', 'Trumpet', 'Cornet', 'Flugelhorn', 'French Horn', 'Trombone', 'Bass Trombone', 'Euphonium', 'Tuba', 'Double Bass', 'Glockenspiel', 'Xylophone', 'Marimba', 'Vibraphone', 'Tubular Bells', 'Timpani', 'Snare Drum', 'Bass Drum', 'Crash Cymbals', 'Suspended Cymbal', 'Tambourine', 'Tam-tam', 'Wood Block', 'Castanets', 'Shaker', 'Drum Set', 'Harp', 'Electric Bass', '未分類'];
 let activePartFilter = 'すべて';
 let draggedPageIndex = null;
 let activeCropPageIndex = null;
@@ -716,7 +716,6 @@ function normalizeAiPartName(value) {
     ["Castanets", /castanets|カスタネット/i],
     ["Shaker", /shaker|maracas|シェイカー|マラカス/i],
     ["Drum Set", /drum\s*set|drums|ドラムセット/i],
-    ["Piano", /piano|pf\.?|ピアノ/i],
     ["Harp", /harp|hp\.?|ハープ/i],
     ["Electric Bass", /electric\s*bass|e\.?\s*bass|エレキベース/i]
   ];
@@ -767,7 +766,6 @@ function normalizeAiPartName(value) {
     ["Castanets", ["castanets"]],
     ["Shaker", ["shaker", "maracas"]],
     ["Drum Set", ["drum set", "drums"]],
-    ["Piano", ["piano", "pf"]],
     ["Harp", ["harp", "hp"]],
     ["Electric Bass", ["electric bass", "e bass"]]
   ];
