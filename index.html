@@ -123,7 +123,7 @@ transition: transform 0.15s ease;
 <span class="text-[10px] font-bold px-1.5 py-0.5 bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 rounded">端末内OCR</span>
 </div>
 <p class="text-xs text-slate-500 dark:text-slate-400 mb-3">
-各ページの上段3箇所（左・中央・右）と下段3箇所（左・中央・右）の計6箇所を切り抜き、端末内OCRで順番に読み取ります。画像やPDFは外部サーバーへ送信しません。読み取った文字を楽器名リストと照合し、移調表記やパート番号を除いて分類します。
+各ページ左上の楽器名欄を優先して端末内OCRで読み取ります。ロゴや曲名など別の文字から誤分類しないよう、楽器名欄で判定できないページは未分類にします。画像やPDFは外部サーバーへ送信しません。
 </p>
 <button id="btn-auto-detect" class="w-full py-2.5 px-4 bg-amber-500 hover:bg-amber-600 text-white font-medium text-sm rounded-lg shadow-sm flex items-center justify-center space-x-2 transition">
 <i data-lucide="scan-line" class="w-4 h-4"></i>
@@ -637,8 +637,9 @@ function cleanOcrText(value) {
 async function recognizePartWithOcr(worker, pageItem) {
   const blobs = await extractPageLabelBlobs(pageItem);
   const readings = [];
-  // Read in this order: upper-left, upper-center, upper-right, lower-left, lower-center, lower-right.
+  // 楽器名欄だけを対象にし、別の場所の文字からは分類しない。
   for (let i = 0; i < blobs.length; i++) {
+    await worker.setParameters({ preserve_interword_spaces: '1', tessedit_pageseg_mode: '6', user_defined_dpi: '300' });
     const result = await worker.recognize(blobs[i]);
     const text = cleanOcrText(result && result.data ? result.data.text : '');
     readings.push(text);
@@ -646,7 +647,7 @@ async function recognizePartWithOcr(worker, pageItem) {
     if (part) return { part, text, confidence: result.data.confidence || 0, region: i + 1 };
   }
   const combined = readings.filter(Boolean).join(' / ');
-  throw new Error('6箇所から楽器名を特定できませんでした' + (combined ? '。OCR文字:「' + combined.slice(0, 140) + '」' : ''));
+  throw new Error('左上の楽器名欄を判読できませんでした。誤分類を避けるため未分類にしています' + (combined ? '。OCR文字:「' + combined.slice(0, 140) + '」' : ''));
 }
 
 function normalizeAiPartName(value) {
@@ -911,7 +912,7 @@ async function extractPageLabelBlobs(pageItem) {
     page = await pdfDoc.getPage(pageItem.pageNum);
     const base = page.getViewport({ scale: 1 });
     const scale = Math.min(4, 3600 / Math.max(base.width, base.height), Math.sqrt(10000000 / (base.width * base.height)));
-    const viewport = page.getViewport({ scale: Math.max(1.5, scale) });
+    const viewport = page.getViewport({ scale: Math.max(2, scale) });
     sourceCanvas = document.createElement('canvas');
     sourceCanvas.width = Math.ceil(viewport.width);
     sourceCanvas.height = Math.ceil(viewport.height);
@@ -921,49 +922,42 @@ async function extractPageLabelBlobs(pageItem) {
     ctx.fillRect(0, 0, sourceCanvas.width, sourceCanvas.height);
     await page.render({ canvasContext: ctx, viewport }).promise;
 
-    // Six focused label windows: top row and bottom row, each split into left/center/right.
-    // Narrower vertical bands keep the instrument text larger than a full half-page crop.
+    // Most printed part labels sit immediately below/inside the upper-left publisher mark.
+    // Two tight crops are used; no center/bottom page text is considered.
     const regions = [
-      { x: 0, y: 0.02 }, { x: 1, y: 0.02 }, { x: 2, y: 0.02 },
-      { x: 0, y: 0.70 }, { x: 1, y: 0.70 }, { x: 2, y: 0.70 }
+      { x: 0.02, y: 0.045, w: 0.22, h: 0.085 },
+      { x: 0.015, y: 0.035, w: 0.30, h: 0.13 }
     ];
-    const cellW = sourceCanvas.width / 3;
-    const cropH = Math.ceil(sourceCanvas.height * 0.28);
     for (const region of regions) {
-      const sx = Math.floor(region.x * cellW);
-      const sy = Math.floor(region.y * sourceCanvas.height);
-      const sw = Math.min(sourceCanvas.width - sx, Math.ceil(cellW));
-      const sh = Math.min(sourceCanvas.height - sy, cropH);
+      const sx = Math.floor(sourceCanvas.width * region.x);
+      const sy = Math.floor(sourceCanvas.height * region.y);
+      const sw = Math.min(sourceCanvas.width - sx, Math.ceil(sourceCanvas.width * region.w));
+      const sh = Math.min(sourceCanvas.height - sy, Math.ceil(sourceCanvas.height * region.h));
       const crop = document.createElement('canvas');
-      const factor = Math.min(2.2, 2400 / Math.max(sw, sh));
+      const factor = Math.min(3, 1800 / Math.max(sw, sh));
       crop.width = Math.max(1, Math.ceil(sw * factor));
       crop.height = Math.max(1, Math.ceil(sh * factor));
       const cropCtx = crop.getContext('2d', { alpha: false });
-      if (!cropCtx) throw new Error('切り抜き画像を初期化できません');
+      if (!cropCtx) throw new Error('楽器名欄を初期化できません');
       cropCtx.fillStyle = '#ffffff';
       cropCtx.fillRect(0, 0, crop.width, crop.height);
       cropCtx.imageSmoothingEnabled = true;
       cropCtx.imageSmoothingQuality = 'high';
       cropCtx.drawImage(sourceCanvas, sx, sy, sw, sh, 0, 0, crop.width, crop.height);
 
-      // Improve faint print and small lettering with grayscale contrast enhancement.
+      // Remove faint red stamp influence while preserving dark printed instrument text.
       const image = cropCtx.getImageData(0, 0, crop.width, crop.height);
       const pixels = image.data;
-      let sum = 0;
       for (let p = 0; p < pixels.length; p += 4) {
-        const gray = Math.round(0.299 * pixels[p] + 0.587 * pixels[p + 1] + 0.114 * pixels[p + 2]);
-        sum += gray;
-      }
-      const average = sum / (pixels.length / 4);
-      const threshold = Math.max(145, Math.min(205, average - 24));
-      for (let p = 0; p < pixels.length; p += 4) {
-        const gray = Math.round(0.299 * pixels[p] + 0.587 * pixels[p + 1] + 0.114 * pixels[p + 2]);
-        const enhanced = gray < threshold ? 0 : 255;
-        pixels[p] = pixels[p + 1] = pixels[p + 2] = enhanced;
+        const red = pixels[p], green = pixels[p + 1], blue = pixels[p + 2];
+        const gray = Math.round(0.299 * red + 0.587 * green + 0.114 * blue);
+        const redStamp = red > green * 1.18 && red > blue * 1.12;
+        const value = redStamp ? 255 : Math.max(0, Math.min(255, (gray - 150) * 2.1 + 150));
+        pixels[p] = pixels[p + 1] = pixels[p + 2] = value;
       }
       cropCtx.putImageData(image, 0, 0);
       const blob = await new Promise((resolve, reject) => {
-        crop.toBlob(value => value ? resolve(value) : reject(new Error('切り抜き画像の作成に失敗しました')), 'image/png');
+        crop.toBlob(value => value ? resolve(value) : reject(new Error('楽器名欄の切り抜きに失敗しました')), 'image/png');
       });
       crops.push(blob);
       crop.width = 0;
@@ -976,7 +970,6 @@ async function extractPageLabelBlobs(pageItem) {
     if (sourceCanvas) { sourceCanvas.width = 0; sourceCanvas.height = 0; }
   }
 }
-
 async function extractPageHeaderBlob(pageItem) {
   let pdfDoc = null;
   let page = null;
