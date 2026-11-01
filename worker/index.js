@@ -1,5 +1,5 @@
-const GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent";
-const GEMINI_MODEL = "gemini-2.5-flash-lite";
+const GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent";
+const GEMINI_MODEL = "gemini-3.5-flash-lite";
 
 const ALLOWED_ORIGINS = new Set([
   "https://tsuritetsu-eng.github.io",
@@ -246,7 +246,7 @@ export default {
       return jsonResponse({
         error: "Gemini API returned an error",
         upstreamStatus: upstream.status,
-        details: providerMessage || "NVIDIAから詳細情報のないエラー応答が返されました",
+        details: providerMessage || "Geminiから詳細情報のないエラー応答が返されました",
         requestId
       }, 502, origin);
     }
