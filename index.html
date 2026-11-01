@@ -714,8 +714,18 @@ textRecScoreThresh: 0.12,
 textDetLimitSideLen: 1024,
 textDetBoxThresh: 0.4
 });
-const part = identifyPartFromOcr(ocrResult?.items);
-if (!part) throw new Error('ページ全体から楽器名・パート名を特定できませんでした');
+let part = identifyPartFromOcr(ocrResult?.items);
+// ページ全体で見つからない場合だけ、文字が小さくなりやすい上部を高解像度で再確認
+if (!part) {
+const headerBlob = await extractPageHeaderBlob(pageItem);
+const [headerResult] = await ocr.predict(headerBlob, {
+textRecScoreThresh: 0.08,
+textDetLimitSideLen: 1600,
+textDetBoxThresh: 0.35
+});
+part = identifyPartFromOcr(headerResult?.items);
+}
+if (!part) throw new Error('ページ全体・上部拡大の両方で楽器名・パート名を特定できませんでした');
 let matched = partCategories.find(c => c.toLowerCase() === part.toLowerCase());
 if (!matched) { partCategories.splice(Math.max(1, partCategories.length - 1), 0, part); matched = part; }
 pageItem.partName = matched;
@@ -786,6 +796,47 @@ throw err;
 if (page) { try { page.cleanup(); } catch (_) {} }
 if (pdfDoc) { try { await pdfDoc.destroy(); } catch (_) {} }
 if (canvas) { canvas.width = 0; canvas.height = 0; canvas = null; }
+}
+}
+// ページ上部を高解像度で再OCR（通常OCRで判定できなかった場合のみ使用）
+async function extractPageHeaderBlob(pageItem) {
+let pdfDoc = null;
+let page = null;
+let sourceCanvas = null;
+let headerCanvas = null;
+try {
+pdfDoc = await pdfjsLib.getDocument({
+data: new Uint8Array(pageItem.pdfBuffer.slice(0)),
+maxImageSize: 2600000
+}).promise;
+page = await pdfDoc.getPage(pageItem.pageNum);
+const baseViewport = page.getViewport({ scale: 1 });
+const scale = Math.min(1.8, 1800 / Math.max(baseViewport.width, baseViewport.height));
+const viewport = page.getViewport({ scale });
+sourceCanvas = document.createElement('canvas');
+sourceCanvas.width = Math.ceil(viewport.width);
+sourceCanvas.height = Math.ceil(viewport.height);
+const ctx = sourceCanvas.getContext('2d', { alpha: false });
+if (!ctx) throw new Error('拡大画像を初期化できません');
+ctx.fillStyle = '#ffffff';
+ctx.fillRect(0, 0, sourceCanvas.width, sourceCanvas.height);
+await page.render({ canvasContext: ctx, viewport }).promise;
+headerCanvas = document.createElement('canvas');
+headerCanvas.width = sourceCanvas.width;
+headerCanvas.height = Math.max(1, Math.ceil(sourceCanvas.height * 0.3));
+const headerCtx = headerCanvas.getContext('2d', { alpha: false });
+if (!headerCtx) throw new Error('上部画像を初期化できません');
+headerCtx.fillStyle = '#ffffff';
+headerCtx.fillRect(0, 0, headerCanvas.width, headerCanvas.height);
+headerCtx.drawImage(sourceCanvas, 0, 0, sourceCanvas.width, headerCanvas.height, 0, 0, headerCanvas.width, headerCanvas.height);
+return await new Promise((resolve, reject) => {
+headerCanvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('上部画像の圧縮に失敗しました')), 'image/jpeg', 0.88);
+});
+} finally {
+if (page) { try { page.cleanup(); } catch (_) {} }
+if (pdfDoc) { try { await pdfDoc.destroy(); } catch (_) {} }
+if (sourceCanvas) { sourceCanvas.width = 0; sourceCanvas.height = 0; }
+if (headerCanvas) { headerCanvas.width = 0; headerCanvas.height = 0; }
 }
 }
 // A3 Spread Splitting (pdfsplit.shotaste style)
