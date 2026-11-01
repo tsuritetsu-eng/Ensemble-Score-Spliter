@@ -123,7 +123,7 @@ transition: transform 0.15s ease;
 <span class="text-[10px] font-bold px-1.5 py-0.5 bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 rounded">端末内OCR</span>
 </div>
 <p class="text-xs text-slate-500 dark:text-slate-400 mb-3">
-各ページ左上の楽器名を拡大し、端末内のOCRで文字を読み取ります。画像やPDFは外部サーバーへ送信しません。読み取った文字を楽器名リストと照合し、移調表記やパート番号を除いて分類します。
+各ページの上段3箇所（左・中央・右）と下段3箇所（左・中央・右）の計6箇所を切り抜き、端末内OCRで順番に読み取ります。画像やPDFは外部サーバーへ送信しません。読み取った文字を楽器名リストと照合し、移調表記やパート番号を除いて分類します。
 </p>
 <button id="btn-auto-detect" class="w-full py-2.5 px-4 bg-amber-500 hover:bg-amber-600 text-white font-medium text-sm rounded-lg shadow-sm flex items-center justify-center space-x-2 transition">
 <i data-lucide="scan-line" class="w-4 h-4"></i>
@@ -635,14 +635,20 @@ function cleanOcrText(value) {
   return String(value || '').replace(/[|]/g, 'I').replace(/[：:]/g, ' ').replace(/[()（）\[\]{}]/g, ' ').replace(/\s+/g, ' ').trim();
 }
 async function recognizePartWithOcr(worker, pageItem) {
-  const blob = await extractPageHeaderBlob(pageItem);
-  if (!blob) throw new Error('楽器名部分の画像を作成できませんでした');
-  const result = await worker.recognize(blob);
-  const text = cleanOcrText(result && result.data ? result.data.text : '');
-  const part = normalizeAiPartName(text);
-  if (!part) throw new Error('楽器名を読み取れませんでした' + (text ? '。OCR文字:「' + text.slice(0, 100) + '」' : ''));
-  return { part, text, confidence: result.data.confidence || 0 };
+  const blobs = await extractPageLabelBlobs(pageItem);
+  const readings = [];
+  // Read in this order: upper-left, upper-center, upper-right, lower-left, lower-center, lower-right.
+  for (let i = 0; i < blobs.length; i++) {
+    const result = await worker.recognize(blobs[i]);
+    const text = cleanOcrText(result && result.data ? result.data.text : '');
+    readings.push(text);
+    const part = normalizeAiPartName(text);
+    if (part) return { part, text, confidence: result.data.confidence || 0, region: i + 1 };
+  }
+  const combined = readings.filter(Boolean).join(' / ');
+  throw new Error('6箇所から楽器名を特定できませんでした' + (combined ? '。OCR文字:「' + combined.slice(0, 140) + '」' : ''));
 }
+
 function normalizeAiPartName(value) {
   if (typeof value !== "string") return "";
   const text = value.replace(/\s+/g, " ").trim();
@@ -763,7 +769,7 @@ async function runAIRecognition() {
       const pageItem = pageList[i];
       try {
         button.innerHTML = '<span>OCR認識中 ' + (i + 1) + '/' + pageList.length + '</span>';
-        showToast('ページ左上の楽器名をOCRで読み取っています ' + (i + 1) + '/' + pageList.length, 'info');
+        showToast('ページ内6箇所の楽器名候補をOCRで読み取っています ' + (i + 1) + '/' + pageList.length, 'info');
         const result = await recognizePartWithOcr(worker, pageItem);
         const matched = partCategories.find(c => c.toLowerCase() === result.part.toLowerCase());
         if (!matched) throw new Error('登録済みの楽器名に一致しません: ' + result.part);
@@ -892,6 +898,63 @@ async function extractPageTileBlobs(pageItem) {
   }
 }
 // ページ上部を高解像度で切り出し（通常認識で判定できなかった場合のみ使用）
+async function extractPageLabelBlobs(pageItem) {
+  let pdfDoc = null;
+  let page = null;
+  let sourceCanvas = null;
+  const crops = [];
+  try {
+    pdfDoc = await pdfjsLib.getDocument({
+      data: new Uint8Array(pageItem.pdfBuffer.slice(0)),
+      maxImageSize: 8400000
+    }).promise;
+    page = await pdfDoc.getPage(pageItem.pageNum);
+    const base = page.getViewport({ scale: 1 });
+    const scale = Math.min(3.2, 3200 / Math.max(base.width, base.height), Math.sqrt(8400000 / (base.width * base.height)));
+    const viewport = page.getViewport({ scale: Math.max(1, scale) });
+    sourceCanvas = document.createElement('canvas');
+    sourceCanvas.width = Math.ceil(viewport.width);
+    sourceCanvas.height = Math.ceil(viewport.height);
+    const ctx = sourceCanvas.getContext('2d', { alpha: false });
+    if (!ctx) throw new Error('ページ画像を初期化できません');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, sourceCanvas.width, sourceCanvas.height);
+    await page.render({ canvasContext: ctx, viewport }).promise;
+
+    const regions = [
+      { x: 0, y: 0 }, { x: 1, y: 0 }, { x: 2, y: 0 },
+      { x: 0, y: 1 }, { x: 1, y: 1 }, { x: 2, y: 1 }
+    ];
+    const cellW = sourceCanvas.width / 3;
+    const cellH = sourceCanvas.height / 2;
+    for (const region of regions) {
+      const sx = Math.floor(region.x * cellW);
+      const sy = Math.floor(region.y * cellH);
+      const sw = Math.min(sourceCanvas.width - sx, Math.ceil(cellW));
+      const sh = Math.min(sourceCanvas.height - sy, Math.ceil(cellH));
+      const crop = document.createElement('canvas');
+      const factor = Math.min(1.6, 1800 / Math.max(sw, sh));
+      crop.width = Math.max(1, Math.ceil(sw * factor));
+      crop.height = Math.max(1, Math.ceil(sh * factor));
+      const cropCtx = crop.getContext('2d', { alpha: false });
+      if (!cropCtx) throw new Error('切り抜き画像を初期化できません');
+      cropCtx.fillStyle = '#ffffff';
+      cropCtx.fillRect(0, 0, crop.width, crop.height);
+      cropCtx.drawImage(sourceCanvas, sx, sy, sw, sh, 0, 0, crop.width, crop.height);
+      const blob = await new Promise((resolve, reject) => {
+        crop.toBlob(value => value ? resolve(value) : reject(new Error('切り抜き画像の作成に失敗しました')), 'image/jpeg', 0.95);
+      });
+      crops.push(blob);
+      crop.width = 0;
+      crop.height = 0;
+    }
+    return crops;
+  } finally {
+    if (page) { try { page.cleanup(); } catch (_) {} }
+    if (pdfDoc) { try { await pdfDoc.destroy(); } catch (_) {} }
+    if (sourceCanvas) { sourceCanvas.width = 0; sourceCanvas.height = 0; }
+  }
+}
 async function extractPageHeaderBlob(pageItem) {
   let pdfDoc = null;
   let page = null;
