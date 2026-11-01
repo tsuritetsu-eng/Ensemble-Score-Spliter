@@ -210,7 +210,7 @@ A3横長などの見開き譜面を真ん中で独立した2枚のページ（A4
 </div>
 <h3 class="text-base font-semibold text-slate-700 dark:text-slate-200 mb-1">ここにPDF楽譜ファイルをドラッグ＆ドロップ</h3>
 <p class="text-xs text-slate-400 max-w-sm mb-4">またはファイル選択ボタンから読み込んでください（複数可）</p>
-<span class="px-3 py-1 bg-slate-100 dark:bg-slate-700 text-slate-500 text-[11px] rounded-full">ブラウザ内＆Cloudflare Workerによる高速・超軽量処理</span>
+<span class="px-3 py-1 bg-slate-100 dark:bg-slate-700 text-slate-500 text-[11px] rounded-full">ブラウザ内で無料OCR処理（画像は外部送信されません）</span>
 </div>
 <!-- Pages Grid Container -->
 <div id="pages-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 relative z-10">
@@ -711,7 +711,7 @@ const pageItem = pageList[i];
 try {
 const headerBase64 = await extractHeaderImageBase64(pageItem);
 if (!headerBase64) throw new Error('ヘッダー画像を作成できませんでした');
-const headerBlob = await (await fetch('data:image/jpeg;base64,' + headerBase64)).blob();
+const binary = atob(headerBase64);\nconst bytes = new Uint8Array(binary.length);\nfor (let j = 0; j < binary.length; j++) bytes[j] = binary.charCodeAt(j);\nconst headerBlob = new Blob([bytes], { type: 'image/jpeg' });
 const [ocrResult] = await ocr.predict(headerBlob, { textRecScoreThresh: 0.25 });
 const part = identifyPartFromOcr(ocrResult?.items);
 if (!part) throw new Error('ヘッダーから楽器名・パート名を特定できませんでした');
