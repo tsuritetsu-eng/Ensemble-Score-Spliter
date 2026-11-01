@@ -158,8 +158,10 @@ export default {
     }
 
     let image;
+    let headerImage = null;
     try {
       image = parseImage(payload?.image);
+      if (payload?.headerImage) headerImage = parseImage(payload.headerImage);
     } catch (error) {
       const messages = {
         IMAGE_REQUIRED: "Image data is required",
@@ -174,10 +176,12 @@ export default {
 
     const prompt = [
       "You are identifying the instrument or part name printed in the header of a sheet-music page.",
-      "The image is a complete sheet-music page. The part label may be small and may appear in the upper-left area near a publisher stamp or title.",
-      "Inspect the entire page, especially the upper-left header. Read the printed instrument or part label, not the composition title, composer, publisher, or watermark.",
-      "For example, if the header says 'C Trombone', return exactly 'Trombone'. Preserve meaningful part numbers or section labels.",
-      "If the label is visible but partly obscured, use the readable text. Return UNKNOWN only if no instrument or part label can be determined.",
+      "You will receive a full sheet-music page and, if available, a separate enlarged crop of the top 30 percent of that same page.",
+      "The enlarged header crop is provided specifically to make small printed instrument labels readable. Examine it carefully, especially the upper-left corner.",
+      "Find the instrument or part name printed on the page. Do not answer UNKNOWN merely because the text is small; inspect the enlarged crop and infer the clearly readable instrument name.",
+      "Ignore composition title, composer, publisher, copyright, watermark, and red publisher stamps. The part label may be immediately beside or below a publisher mark.",
+      "Example: 'C Trombone' means return exactly 'Trombone'. Keep meaningful part numbers such as 'Clarinet 2' or 'Violin I'.",
+      "If you can read any part of the label, return the best supported instrument or part name. Use UNKNOWN only if the label truly cannot be read.",
       "Output only the instrument or part name, without explanation."
     ].join(" ");
 
@@ -198,7 +202,12 @@ export default {
             role: "user",
             parts: [
               { text: prompt },
-              { inline_data: { mime_type: image.mime, data: image.base64 } }
+              { text: "FULL PAGE:" },
+              { inline_data: { mime_type: image.mime, data: image.base64 } },
+              ...(headerImage ? [
+                { text: "ENLARGED HEADER CROP — inspect this closely for the part label:" },
+                { inline_data: { mime_type: headerImage.mime, data: headerImage.base64 } }
+              ] : [])
             ]
           }],
           generationConfig: {
