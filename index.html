@@ -652,7 +652,11 @@ async function recognizePartWithOcr(worker, pageItem) {
 
 function normalizeAiPartName(value) {
   if (typeof value !== "string") return "";
-  const text = value.replace(/\s+/g, " ").trim();
+  // 楽器名末尾のパート番号・声部番号を除去（例: Oboe-3 / Oboe 3 / Oboe III）。
+  const text = value.replace(/\s+/g, " ").trim()
+    .replace(/[\\s._-]+(?:part\\s*)?\\d+\\s*$/i, "")
+    .replace(/[\\s._-]+(?:part\\s*)?(?:II|III|IV|V|VI|VII|VIII|IX|X)\\s*$/i, "")
+    .trim();
   const rules = [
     ["Full Score", /full\s*score|conductor|総譜|指揮者用|スコア/i],
     ["Contrabass Clarinet", /contrabass\s*clarinet|c\.?b\.?\s*cl\.?|コントラバスクラリネット/i],
