@@ -164,21 +164,38 @@ transition: transform 0.15s ease;
 <p class="text-xs text-slate-500 dark:text-slate-400 mb-3">
 A3横長などの見開き譜面を真ん中で独立した2枚のページ（A4）に分割します。
 </p>
-<div class="flex items-center justify-between mb-3 text-xs text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-700/50 p-2 rounded-lg">
-<span>ページ開き方向:</span>
-<select id="spread-direction" class="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded px-2 py-1 text-xs focus:outline-none">
-<option value="ltr">左 ➔ 右 (通常の楽譜)</option>
-<option value="rtl">右 ➔ 左 (日本語/一部スコア)</option>
+<div class="space-y-3 mb-3 text-xs text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-700/50 p-3 rounded-lg">
+<div>
+<label for="spread-axis" class="block font-semibold mb-1">分割方向</label>
+<select id="spread-axis" class="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded px-2 py-2">
+<option value="horizontal">左右に分割</option>
+<option value="vertical">上下に分割</option>
 </select>
 </div>
+<div>
+<label for="spread-order" class="block font-semibold mb-1">出力順</label>
+<select id="spread-order" class="w-full bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded px-2 py-2">
+<option value="first">左ページ / 上ページから</option>
+<option value="second">右ページ / 下ページから</option>
+</select>
+</div>
+<div>
+<div class="flex items-center justify-between mb-1">
+<label for="spread-position" class="font-semibold">分割位置</label>
+<span id="spread-position-label" class="font-semibold tabular-nums">50%</span>
+</div>
+<input id="spread-position" type="range" min="20" max="80" step="1" value="50" class="w-full accent-indigo-600">
+<p class="text-[10px] text-slate-500 dark:text-slate-400 mt-1">プレビュー上の線をドラッグしても調整できます。</p>
+</div>
+</div>
 <div class="grid grid-cols-2 gap-2">
-<button id="btn-split-selected-spread" class="py-2 px-2 bg-indigo-50 dark:bg-indigo-950/40 hover:bg-indigo-100 dark:hover:bg-indigo-900 text-indigo-600 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 font-medium text-xs rounded-lg transition flex items-center justify-center space-x-1">
+<button id="btn-split-selected-spread" class="py-2.5 px-2 bg-indigo-50 dark:bg-indigo-950/40 hover:bg-indigo-100 dark:hover:bg-indigo-900 text-indigo-600 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 font-medium text-xs rounded-lg transition flex items-center justify-center space-x-1">
 <i data-lucide="columns-2" class="w-3.5 h-3.5"></i>
 <span>選択ページを分割</span>
 </button>
-<button id="btn-split-all-spreads" class="py-2 px-2 bg-indigo-600 hover:bg-indigo-700 text-white font-medium text-xs rounded-lg shadow-sm transition flex items-center justify-center space-x-1">
-<i data-lucide="shrink" class="w-3.5 h-3.5"></i>
-<span>横長をすべて全分割</span>
+<button id="btn-split-all-spreads" class="py-2.5 px-2 bg-indigo-600 hover:bg-indigo-700 text-white font-medium text-xs rounded-lg shadow-sm transition flex items-center justify-center space-x-1">
+<i data-lucide="scissors" class="w-3.5 h-3.5"></i>
+<span>すべて一括分割</span>
 </button>
 </div>
 </div>
@@ -240,7 +257,7 @@ A3横長などの見開き譜面を真ん中で独立した2枚のページ（A4
 <span class="px-3 py-1 bg-slate-100 dark:bg-slate-700 text-slate-500 text-[11px] rounded-full">Gemini AIによるページ全体の画像認識（ページ画像を外部送信します）</span>
 </div>
 <!-- Pages Grid Container -->
-<div id="pages-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 relative z-10">
+<div id="pages-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5 relative z-10">
 <!-- Page Cards JS Injected -->
 </div>
 </div>
@@ -369,6 +386,24 @@ setupEnsembleSelector();
 // Spread Splitting
 document.getElementById('btn-split-selected-spread').addEventListener('click', () => splitSpreads(true));
 document.getElementById('btn-split-all-spreads').addEventListener('click', () => splitSpreads(false));
+let spreadPositionPercent = 50;
+const spreadPositionInput = document.getElementById('spread-position');
+const spreadPositionLabel = document.getElementById('spread-position-label');
+function setSpreadPosition(value) {
+  spreadPositionPercent = Math.max(20, Math.min(80, Number(value) || 50));
+  spreadPositionInput.value = String(spreadPositionPercent);
+  spreadPositionLabel.textContent = spreadPositionPercent + '%';
+  document.querySelectorAll('.spread-cut-line').forEach(line => {
+    const axis = document.getElementById('spread-axis').value;
+    line.style.left = axis === 'horizontal' ? spreadPositionPercent + '%' : '0';
+    line.style.top = axis === 'vertical' ? spreadPositionPercent + '%' : '0';
+    line.style.width = axis === 'horizontal' ? '2px' : '100%';
+    line.style.height = axis === 'vertical' ? '2px' : '100%';
+  });
+}
+spreadPositionInput.addEventListener('input', e => setSpreadPosition(e.target.value));
+document.getElementById('spread-axis').addEventListener('change', () => { renderPagesGrid(); });
+document.getElementById('spread-order').addEventListener('change', () => {});
 // Custom Part Category
 document.getElementById('btn-add-custom-part').addEventListener('click', () => {
 const name = prompt('追加するパート名を入力してください (例: Saxophone 2):');
@@ -540,11 +575,41 @@ renderPagesGrid();
 });
 // Thumbnail Container
 const thumbBox = document.createElement('div');
-thumbBox.className = 'w-full h-44 bg-slate-100 dark:bg-slate-800 relative flex items-center justify-center p-2 overflow-hidden';
+thumbBox.className = 'w-full h-64 sm:h-72 lg:h-80 bg-slate-100 dark:bg-slate-800 relative flex items-center justify-center p-3 overflow-hidden';
 const canvas = document.createElement('canvas');
 canvas.className = 'max-h-full max-w-full object-contain shadow-sm rounded transition-transform duration-200';
 canvas.style.transform = `rotate(${pageItem.rotation}deg)`;
 thumbBox.appendChild(canvas);
+// Draggable split guide (preview only; shared split position)
+const cutLine = document.createElement('div');
+cutLine.className = 'spread-cut-line absolute z-[5] bg-rose-500 shadow-[0_0_0_1px_rgba(255,255,255,.8)]';
+cutLine.style.pointerEvents = 'auto';
+const updateCutLine = () => {
+  const axis = document.getElementById('spread-axis').value;
+  cutLine.style.left = axis === 'horizontal' ? spreadPositionPercent + '%' : '0';
+  cutLine.style.top = axis === 'vertical' ? spreadPositionPercent + '%' : '0';
+  cutLine.style.width = axis === 'horizontal' ? '2px' : '100%';
+  cutLine.style.height = axis === 'vertical' ? '2px' : '100%';
+  cutLine.style.cursor = axis === 'horizontal' ? 'ew-resize' : 'ns-resize';
+};
+updateCutLine();
+let draggingCutLine = false;
+cutLine.addEventListener('pointerdown', e => { draggingCutLine = true; cutLine.setPointerCapture(e.pointerId); e.preventDefault(); e.stopPropagation(); });
+cutLine.addEventListener('pointermove', e => {
+  if (!draggingCutLine) return;
+  const rect = thumbBox.getBoundingClientRect();
+  const axis = document.getElementById('spread-axis').value;
+  setSpreadPosition(axis === 'horizontal' ? (e.clientX - rect.left) / rect.width * 100 : (e.clientY - rect.top) / rect.height * 100);
+  document.querySelectorAll('.spread-cut-line').forEach(line => {
+    const a = document.getElementById('spread-axis').value;
+    line.style.left = a === 'horizontal' ? spreadPositionPercent + '%' : '0';
+    line.style.top = a === 'vertical' ? spreadPositionPercent + '%' : '0';
+  });
+});
+const stopCutDrag = () => { draggingCutLine = false; };
+cutLine.addEventListener('pointerup', stopCutDrag);
+cutLine.addEventListener('pointercancel', stopCutDrag);
+thumbBox.appendChild(cutLine);
 // Checkbox Overlay
 const checkBtn = document.createElement('button');
 checkBtn.className = `absolute top-2 left-2 w-6 h-6 rounded-md flex items-center justify-center transition ${pageItem.selected ? 'bg-brand-500 text-white' : 'bg-slate-900/40 text-transparent hover:text-white'}`;
@@ -588,7 +653,8 @@ try {
 if (!job.canvas.isConnected) return;
 pdfDoc = await pdfjsLib.getDocument({ data: new Uint8Array(job.pageItem.pdfBuffer.slice(0)) }).promise;
 page = await pdfDoc.getPage(job.pageItem.pageNum);
-const viewport = page.getViewport({ scale: 0.3, rotation: job.pageItem.rotation || 0 });
+const baseViewport = page.getViewport({ scale: 1, rotation: job.pageItem.rotation || 0 });
+const viewport = page.getViewport({ scale: Math.min(0.62, 1400 / Math.max(baseViewport.width, baseViewport.height)), rotation: job.pageItem.rotation || 0 });
 const ctx = job.canvas.getContext('2d', { alpha: false });
 job.canvas.width = Math.ceil(viewport.width);
 job.canvas.height = Math.ceil(viewport.height);
@@ -1267,49 +1333,41 @@ async function extractPageHeaderBlob(pageItem) {
     if (headerCanvas) { headerCanvas.width = 0; headerCanvas.height = 0; }
   }
 }
-// A3 Spread Splitting (pdfsplit.shotaste style)
+// 見開き分割：左右・上下、分割位置、出力順を設定可能
 async function splitSpreads(onlySelected = false) {
-const targets = pageList.filter(p => onlySelected ? p.selected : true);
-if (targets.length === 0) {
-showToast('対象となるページがありません', 'error');
-return;
-}
-const direction = document.getElementById('spread-direction').value; // 'ltr' or 'rtl'
-let newPageList = [];
-let splitCount = 0;
-showToast('見開き分割処理中...', 'info');
-for (let i = 0; i < pageList.length; i++) {
-const p = pageList[i];
-const shouldSplit = onlySelected ? p.selected : (p.width > p.height * 1.2); // Auto aspect check
-if (shouldSplit) {
-// Left and Right Pages Creation using CropBox
-const halfWidth = p.width / 2;
-const pageLeft = {
-...p,
-id: 'page_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
-cropBox: { x: 0, y: 0, width: halfWidth, height: p.height },
-selected: false
-};
-const pageRight = {
-...p,
-id: 'page_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
-cropBox: { x: halfWidth, y: 0, width: halfWidth, height: p.height },
-selected: false
-};
-if (direction === 'ltr') {
-newPageList.push(pageLeft, pageRight);
-} else {
-newPageList.push(pageRight, pageLeft);
-}
-splitCount++;
-} else {
-newPageList.push(p);
-}
-}
-pageList = newPageList;
-renderPagesGrid();
-renderPartCategories();
-showToast(`${splitCount} 枚の見開き楽譜を分割しました`, 'success');
+  const targets = pageList.filter(p => onlySelected ? p.selected : true);
+  if (!targets.length) { showToast('対象となるページがありません', 'error'); return; }
+  const axis = document.getElementById('spread-axis').value;
+  const order = document.getElementById('spread-order').value;
+  const ratio = spreadPositionPercent / 100;
+  const nextPages = [];
+  let splitCount = 0;
+  showToast('見開き分割処理中...', 'info');
+  for (const p of pageList) {
+    const shouldSplit = onlySelected ? p.selected : true;
+    if (!shouldSplit) { nextPages.push(p); continue; }
+    const firstId = 'page_' + Date.now() + '_' + Math.random().toString(36).slice(2, 9);
+    const secondId = 'page_' + Date.now() + '_' + Math.random().toString(36).slice(2, 9);
+    let firstCrop, secondCrop;
+    if (axis === 'horizontal') {
+      const cutX = p.width * ratio;
+      firstCrop = { x: 0, y: 0, width: cutX, height: p.height };
+      secondCrop = { x: cutX, y: 0, width: p.width - cutX, height: p.height };
+    } else {
+      const cutY = p.height * (1 - ratio);
+      firstCrop = { x: 0, y: cutY, width: p.width, height: p.height * ratio };
+      secondCrop = { x: 0, y: 0, width: p.width, height: p.height * (1 - ratio) };
+    }
+    const firstPage = { ...p, id: firstId, cropBox: firstCrop, selected: false };
+    const secondPage = { ...p, id: secondId, cropBox: secondCrop, selected: false };
+    if (order === 'first') nextPages.push(firstPage, secondPage);
+    else nextPages.push(secondPage, firstPage);
+    splitCount++;
+  }
+  pageList = nextPages;
+  renderPagesGrid();
+  renderPartCategories();
+  showToast(`${splitCount} ページを分割しました（${axis === 'horizontal' ? '左右' : '上下'}・位置 ${spreadPositionPercent}%）`, 'success');
 }
 // Crop Modal Controls
 function cropPage(id) {
