@@ -31,6 +31,8 @@ brand: {
 <!-- JSZip & FileSaver -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+<!-- Tesseract.js OCR (browser-side; no image upload) -->
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
 <!-- Lucide Icons -->
 <script src="https://unpkg.com/lucide@latest"></script>
 <style>
@@ -116,16 +118,16 @@ transition: transform 0.15s ease;
 <div class="flex items-center justify-between mb-2">
 <h2 class="text-sm font-semibold flex items-center space-x-2 text-slate-700 dark:text-slate-200">
 <i data-lucide="sparkles" class="w-4 h-4 text-amber-500"></i>
-<span>AI パート自動認識</span>
+<span>OCR パート自動認識</span>
 </h2>
-<span class="text-[10px] font-bold px-1.5 py-0.5 bg-sky-100 dark:bg-sky-900/40 text-sky-700 dark:text-sky-300 rounded">Gemini AI</span>
+<span class="text-[10px] font-bold px-1.5 py-0.5 bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 rounded">端末内OCR</span>
 </div>
 <p class="text-xs text-slate-500 dark:text-slate-400 mb-3">
-各ページ全体を確認し、位置を限定せずに楽器名・パート名を探します。判定できない場合は補助画像でも再確認します。画像はCloudflare Worker経由でGemini AIに送信され、APIキーはWorker側で保護されます。
+各ページ左上の楽器名を拡大し、端末内のOCRで文字を読み取ります。画像やPDFは外部サーバーへ送信しません。読み取った文字を楽器名リストと照合し、移調表記やパート番号を除いて分類します。
 </p>
 <button id="btn-auto-detect" class="w-full py-2.5 px-4 bg-amber-500 hover:bg-amber-600 text-white font-medium text-sm rounded-lg shadow-sm flex items-center justify-center space-x-2 transition">
 <i data-lucide="scan-line" class="w-4 h-4"></i>
-<span>Gemini AIでパート名を認識</span>
+<span>OCRでパート名を認識</span>
 </button>
 </div>
 <!-- A3 Spread Split (pdfsplit style) -->
@@ -260,8 +262,7 @@ A3横長などの見開き譜面を真ん中で独立した2枚のページ（A4
 <script>
 // PDF.js Worker Init
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-// Gemini Vision AI: Cloudflare Worker proxy
-const GEMINI_WORKER_URL = "https://sheet-music-parser.mrtsuritetsu.workers.dev";
+// Browser-side OCR; no external AI API is used.
 // State Management
 let pageList = []; // { id, originalPdfIndex, pageNum, pdfBuffer, rotation, cropBox, partName, selected, width, height }
 let partCategories = ['すべて', 'Full Score', 'Flute', 'Piccolo', 'Oboe', 'English Horn', 'Bassoon', 'E♭ Clarinet', 'B♭ Clarinet', 'Alto Clarinet', 'Bass Clarinet', 'Contrabass Clarinet', 'Soprano Saxophone', 'Alto Saxophone', 'Tenor Saxophone', 'Baritone Saxophone', 'Trumpet', 'Cornet', 'Flugelhorn', 'French Horn', 'Trombone', 'Bass Trombone', 'Euphonium', 'Tuba', 'Double Bass', 'Glockenspiel', 'Xylophone', 'Marimba', 'Vibraphone', 'Tubular Bells', 'Timpani', 'Snare Drum', 'Bass Drum', 'Crash Cymbals', 'Suspended Cymbal', 'Tambourine', 'Triangle', 'Tam-tam', 'Wood Block', 'Castanets', 'Shaker', 'Drum Set', 'Piano', 'Harp', 'Electric Bass', '未分類'];
@@ -629,14 +630,18 @@ pageList = pageList.filter(p => !p.selected);
 renderPagesGrid();
 renderPartCategories();
 }
-// Gemini Vision AI: send the entire rendered page through the Cloudflare Worker
-function blobToDataUrl(blob) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ""));
-    reader.onerror = () => reject(new Error("画像データを読み込めませんでした"));
-    reader.readAsDataURL(blob);
-  });
+// Browser-side OCR helpers
+function cleanOcrText(value) {
+  return String(value || '').replace(/[|]/g, 'I').replace(/[：:]/g, ' ').replace(/[()（）\[\]{}]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+async function recognizePartWithOcr(worker, pageItem) {
+  const blob = await extractPageHeaderBlob(pageItem);
+  if (!blob) throw new Error('楽器名部分の画像を作成できませんでした');
+  const result = await worker.recognize(blob);
+  const text = cleanOcrText(result && result.data ? result.data.text : '');
+  const part = normalizeAiPartName(text);
+  if (!part) throw new Error('楽器名を読み取れませんでした' + (text ? '。OCR文字:「' + text.slice(0, 100) + '」' : ''));
+  return { part, text, confidence: result.data.confidence || 0 };
 }
 function normalizeAiPartName(value) {
   if (typeof value !== "string") return "";
@@ -763,6 +768,10 @@ async function requestGeminiPart(imageBase64, pageNumber) {
 async function runAIRecognition() {
   if (isRecognizing) return;
   if (pageList.length === 0) { showToast('認識する楽譜ページがありません', 'error'); return; }
+  if (!window.Tesseract || !window.Tesseract.createWorker) {
+    showToast('OCRエンジンを読み込めません。ページを再読み込みしてください。', 'error');
+    return;
+  }
   const button = document.getElementById('btn-auto-detect');
   const originalHTML = button.innerHTML;
   isRecognizing = true;
@@ -771,80 +780,40 @@ async function runAIRecognition() {
   let detectedCount = 0;
   let failedCount = 0;
   const failureDetails = [];
-
-  // 楽器名が印刷される位置を優先。今回確認した譜面のような左上の小さな表記を先に拡大して読む。
-  async function tryImageBlob(blob, pageNumber, label) {
-    if (!blob) throw new Error(label + '画像を作成できませんでした');
-    const base64 = await blobToBase64(blob);
-    if (!base64) throw new Error(label + '画像をBase64に変換できませんでした');
-    return await requestGeminiPart(base64, pageNumber);
-  }
-
+  let worker = null;
   try {
+    showToast('端末内OCRエンジンを準備しています…', 'info');
+    worker = await Tesseract.createWorker('eng');
+    await worker.setParameters({ preserve_interword_spaces: '1' });
     for (let i = 0; i < pageList.length; i++) {
       const pageItem = pageList[i];
       try {
-        let part = '';
-        const attempts = [];
-        button.innerHTML = `<span>楽器名を拡大認識中 ${i + 1}/${pageList.length}</span>`;
-        showToast(`ページ左上の楽器名を拡大して確認しています ${i + 1}/${pageList.length}ページ`, 'info');
-
-        // 1) 左上ラベルの専用クロップを最優先で解析
-        try {
-          part = await tryImageBlob(await extractPageHeaderBlob(pageItem), pageItem.pageNum, '左上ラベル');
-        } catch (err) {
-          attempts.push('左上: ' + String(err?.message || err));
-        }
-
-        // 2) 左上で判定できない場合はページ全体を確認
-        if (!part) {
-          button.innerHTML = `<span>ページ全体を確認中 ${i + 1}/${pageList.length}</span>`;
-          try {
-            part = await tryImageBlob(await extractPageImageBlob(pageItem), pageItem.pageNum, 'ページ全体');
-          } catch (err) {
-            attempts.push('全体: ' + String(err?.message || err));
-          }
-        }
-
-        // 3) それでも不明なら、拡大タイルを順番に確認
-        if (!part) {
-          button.innerHTML = `<span>拡大領域を確認中 ${i + 1}/${pageList.length}</span>`;
-          const tileBlobs = await extractPageTileBlobs(pageItem);
-          for (let tileIndex = 0; tileIndex < tileBlobs.length && !part; tileIndex++) {
-            try {
-              part = await tryImageBlob(tileBlobs[tileIndex], pageItem.pageNum, '拡大領域 ' + (tileIndex + 1));
-            } catch (err) {
-              attempts.push('領域' + (tileIndex + 1) + ': ' + String(err?.message || err));
-            }
-          }
-        }
-
-        if (!part) {
-          throw new Error(attempts.slice(0, 3).join(' / ') || '楽器名を認識できませんでした');
-        }
-        const matched = partCategories.find(c => c.toLowerCase() === part.toLowerCase());
-        if (!matched) throw new Error('登録済みの楽器名に一致しません: ' + part);
+        button.innerHTML = '<span>OCR認識中 ' + (i + 1) + '/' + pageList.length + '</span>';
+        showToast('ページ左上の楽器名をOCRで読み取っています ' + (i + 1) + '/' + pageList.length, 'info');
+        const result = await recognizePartWithOcr(worker, pageItem);
+        const matched = partCategories.find(c => c.toLowerCase() === result.part.toLowerCase());
+        if (!matched) throw new Error('登録済みの楽器名に一致しません: ' + result.part);
         pageItem.partName = matched;
+        pageItem.ocrText = result.text;
         detectedCount++;
       } catch (err) {
         failedCount++;
         const reason = err && err.message ? String(err.message) : '原因不明のエラー';
-        failureDetails.push({ page: i + 1, reason: reason.slice(0, 220) });
-        console.error('Gemini recognition failed on page ' + (i + 1) + ':', err);
+        failureDetails.push({ page: i + 1, reason: reason.slice(0, 180) });
+        console.error('OCR recognition failed on page ' + (i + 1) + ':', err);
       }
-      if ((i + 1) % 2 === 0 || i === pageList.length - 1) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-      }
+      if ((i + 1) % 2 === 0 || i === pageList.length - 1) await new Promise(resolve => setTimeout(resolve, 80));
     }
     renderPartCategories();
     renderPagesGrid();
     const firstFailure = failureDetails[0];
-    const failureSummary = firstFailure ? `（例：P${firstFailure.page} ${firstFailure.reason}）` : '';
-    showToast(`Gemini AI認識完了：${detectedCount}ページ成功${failedCount ? `、${failedCount}ページ失敗 ${failureSummary}` : ''}`, failedCount ? 'error' : 'success');
+    const summary = firstFailure ? '（例：P' + firstFailure.page + ' ' + firstFailure.reason + '）' : '';
+    showToast('OCR認識完了：' + detectedCount + 'ページ成功' + (failedCount ? '、' + failedCount + 'ページ失敗 ' + summary : ''), failedCount ? 'error' : 'success');
   } catch (err) {
-    console.error('Gemini PDF recognition failed:', err);
-    showToast('Gemini AI認識に失敗しました。Workerの設定とAPI利用枠を確認してください。', 'error');
+    console.error('Browser OCR failed:', err);
+    showToast('OCRの起動に失敗しました。通信環境を確認して再読み込みしてください。', 'error');
   } finally {
+    if (worker) { try { await worker.terminate(); } catch (_) {} }
     isRecognizing = false;
     button.disabled = false;
     button.classList.remove('opacity-60', 'cursor-not-allowed');
