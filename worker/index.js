@@ -200,10 +200,8 @@ export default {
     } catch (error) {
       const timedOut = error?.name === "AbortError";
       const diagnostic = String(error?.message || error || "Unknown fetch error")
-        .replace(/https?:\\/\\/[^\\s]+/gi, "[URL]")
-        .replace(/(api[_-]?key|token|secret)\\s*[:=]\\s*[^\\s,;]+/gi, "$1=[redacted]")
-        .replace(/[\\r\\n\\t]+/g, " ")
-        .slice(0, 350);
+        .split("\\r").join(" ").split("\\n").join(" ").split("\\t").join(" ")
+        .slice(0, 250);
       return jsonResponse({
         error: timedOut ? "Gemini request timed out" : "Could not connect to Gemini API",
         details: diagnostic,
