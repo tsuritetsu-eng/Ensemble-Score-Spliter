@@ -665,7 +665,7 @@ const ensembleInstrumentGroups = {
 };
 const ensemblePresets = {
   wind: ["Flute","Piccolo","Oboe","Bassoon","E♭ Clarinet","B♭ Clarinet","Bass Clarinet","Alto Saxophone","Tenor Saxophone","Baritone Saxophone","Trumpet","French Horn","Trombone","Euphonium","Tuba","Double Bass","Timpani","Snare Drum","Bass Drum","Crash Cymbals"],
-  woodwind5: ["Flute","Oboe","English Horn","Clarinet","Bassoon"].filter(x => x !== "Clarinet").concat(["B♭ Clarinet"]),
+  woodwind5: ["Flute","Oboe","B♭ Clarinet","Bassoon","French Horn"],
   brass5: ["Trumpet","French Horn","Trombone","Euphonium","Tuba"],
   sax4: ["Soprano Saxophone","Alto Saxophone","Tenor Saxophone","Baritone Saxophone"],
   brass: ["Trumpet","Cornet","Flugelhorn","French Horn","Trombone","Bass Trombone","Euphonium","Tuba"],
@@ -997,6 +997,13 @@ async function blobToBase64(blob) {
 async function runAIRecognition() {
   if (isRecognizing) return;
   if (pageList.length === 0) { showToast('認識する楽譜ページがありません', 'error'); return; }
+  let allowedCategories = null;
+  try {
+    allowedCategories = getEnabledEnsembleCategories();
+  } catch (err) {
+    showToast(err.message, 'error');
+    return;
+  }
   if (!window.Tesseract || !window.Tesseract.createWorker) {
     showToast('OCRエンジンを読み込めません。ページを再読み込みしてください。', 'error');
     return;
@@ -1019,7 +1026,6 @@ async function runAIRecognition() {
       try {
         button.innerHTML = '<span>OCR認識中 ' + (i + 1) + '/' + pageList.length + '</span>';
         showToast('ページ内6箇所の楽器名候補をOCRで読み取っています ' + (i + 1) + '/' + pageList.length, 'info');
-        const allowedCategories = getEnabledEnsembleCategories();
         const result = await recognizePartWithOcr(worker, pageItem, allowedCategories);
         const matched = partCategories.find(c => c.toLowerCase() === result.part.toLowerCase());
         if (!matched) throw new Error('登録済みの楽器名に一致しません: ' + result.part);
