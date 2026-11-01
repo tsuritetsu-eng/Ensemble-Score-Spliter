@@ -265,7 +265,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs
 // Browser-side OCR; no external AI API is used.
 // State Management
 let pageList = []; // { id, originalPdfIndex, pageNum, pdfBuffer, rotation, cropBox, partName, selected, width, height }
-let partCategories = ['すべて', 'Full Score', 'Flute', 'Piccolo', 'Oboe', 'English Horn', 'Bassoon', 'E♭ Clarinet', 'B♭ Clarinet', 'Alto Clarinet', 'Bass Clarinet', 'Contrabass Clarinet', 'Soprano Saxophone', 'Alto Saxophone', 'Tenor Saxophone', 'Baritone Saxophone', 'Trumpet', 'Cornet', 'Flugelhorn', 'French Horn', 'Trombone', 'Bass Trombone', 'Euphonium', 'Tuba', 'Double Bass', 'Glockenspiel', 'Xylophone', 'Marimba', 'Vibraphone', 'Tubular Bells', 'Timpani', 'Snare Drum', 'Bass Drum', 'Crash Cymbals', 'Suspended Cymbal', 'Tambourine', 'Triangle', 'Tam-tam', 'Wood Block', 'Castanets', 'Shaker', 'Drum Set', 'Piano', 'Harp', 'Electric Bass', '未分類'];
+let partCategories = ['すべて', 'Full Score', 'Flute', 'Piccolo', 'Oboe', 'English Horn', 'Bassoon', 'E♭ Clarinet', 'B♭ Clarinet', 'Alto Clarinet', 'Bass Clarinet', 'Contrabass Clarinet', 'Soprano Saxophone', 'Alto Saxophone', 'Tenor Saxophone', 'Baritone Saxophone', 'Trumpet', 'Cornet', 'Flugelhorn', 'French Horn', 'Trombone', 'Bass Trombone', 'Euphonium', 'Tuba', 'Double Bass', 'Glockenspiel', 'Xylophone', 'Marimba', 'Vibraphone', 'Tubular Bells', 'Timpani', 'Snare Drum', 'Bass Drum', 'Crash Cymbals', 'Suspended Cymbal', 'Tambourine', 'Tam-tam', 'Wood Block', 'Castanets', 'Shaker', 'Drum Set', 'Piano', 'Harp', 'Electric Bass', '未分類'];
 let activePartFilter = 'すべて';
 let draggedPageIndex = null;
 let activeCropPageIndex = null;
@@ -689,7 +689,6 @@ function normalizeAiPartName(value) {
     ["Suspended Cymbal", /suspended\s*cymbal|sus\.?\s*cym\.?|サスペンドシンバル/i],
     ["Crash Cymbals", /crash\s*cymbals?|\bcym\.?|クラッシュシンバル/i],
     ["Tambourine", /tambourine|tamb\.?|タンバリン/i],
-    ["Triangle", /triangle|tri\.?|トライアングル/i],
     ["Tam-tam", /tam[- ]?tam|gong|タムタム|ゴング/i],
     ["Wood Block", /wood\s*block|ウッドブロック/i],
     ["Castanets", /castanets|カスタネット/i],
@@ -741,7 +740,6 @@ function normalizeAiPartName(value) {
     ["Suspended Cymbal", ["suspended cymbal", "sus cym"]],
     ["Crash Cymbals", ["crash cymbals", "crash cymbal", "cymbals", "cym"]],
     ["Tambourine", ["tambourine", "tamb"]],
-    ["Triangle", ["triangle", "tri"]],
     ["Tam-tam", ["tam tam", "gong"]],
     ["Wood Block", ["wood block"]],
     ["Castanets", ["castanets"]],
