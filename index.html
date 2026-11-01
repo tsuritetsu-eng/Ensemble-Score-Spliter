@@ -656,20 +656,20 @@ const ax = Array.isArray(a.poly) ? a.poly.reduce((n, p) => n + (p?.[0] || 0), 0)
 const bx = Array.isArray(b.poly) ? b.poly.reduce((n, p) => n + (p?.[0] || 0), 0) / b.poly.length : 0;
 return ax - bx;
 })
-.map(item => item.text.replace(/\\s+/g, " ").trim())
+.map(item => item.text.replace(/\s+/g, " ").trim())
 .filter(Boolean);
 const allText = lines.join(" ");
 const rules = [
-["Full Score", /full\\s*score|conductor|総譜|指揮者用|スコア/i],
+["Full Score", /full\s*score|conductor|総譜|指揮者用|スコア/i],
 ["Piccolo", /piccolo|ピッコロ/i],
 ["Flute", /flute|フルート/i],
 ["Oboe", /oboe|オーボエ/i],
-["English Horn", /english\\s*horn|cor\\s*anglais|イングリッシュホルン/i],
+["English Horn", /english\s*horn|cor\s*anglais|イングリッシュホルン/i],
 ["Clarinet", /clarinet|クラリネット/i],
-["Bass Clarinet", /bass\\s*clarinet|バスクラリネット/i],
+["Bass Clarinet", /bass\s*clarinet|バスクラリネット/i],
 ["Bassoon", /bassoon|ファゴット/i],
 ["Saxophone", /saxophone|サクソフォン|サックス/i],
-["Horn", /french\\s*horn|ホルン/i],
+["Horn", /french\s*horn|ホルン/i],
 ["Trumpet", /trumpet|トランペット/i],
 ["Trombone", /trombone|トロンボーン/i],
 ["Euphonium", /euphonium|ユーフォニアム/i],
@@ -677,7 +677,7 @@ const rules = [
 ["Violin", /violin|ヴァイオリン|バイオリン/i],
 ["Viola", /viola|ヴィオラ/i],
 ["Cello", /cello|violoncello|チェロ/i],
-["Contrabass", /contrabass|double\\s*bass|コントラバス/i],
+["Contrabass", /contrabass|double\s*bass|コントラバス/i],
 ["Percussion", /percussion|打楽器|パーカッション/i],
 ["Timpani", /timpani|ティンパニ/i],
 ["Piano", /piano|ピアノ/i],
@@ -711,7 +711,10 @@ const pageItem = pageList[i];
 try {
 const headerBase64 = await extractHeaderImageBase64(pageItem);
 if (!headerBase64) throw new Error('ヘッダー画像を作成できませんでした');
-const binary = atob(headerBase64);\nconst bytes = new Uint8Array(binary.length);\nfor (let j = 0; j < binary.length; j++) bytes[j] = binary.charCodeAt(j);\nconst headerBlob = new Blob([bytes], { type: 'image/jpeg' });
+const binary = atob(headerBase64);
+const bytes = new Uint8Array(binary.length);
+for (let j = 0; j < binary.length; j++) bytes[j] = binary.charCodeAt(j);
+const headerBlob = new Blob([bytes], { type: 'image/jpeg' });
 const [ocrResult] = await ocr.predict(headerBlob, { textRecScoreThresh: 0.25 });
 const part = identifyPartFromOcr(ocrResult?.items);
 if (!part) throw new Error('ヘッダーから楽器名・パート名を特定できませんでした');
