@@ -683,8 +683,16 @@ async function requestGeminiPart(imageBlob) {
     const detail = data.details ? "：" + data.details : "";
     throw new Error((data.error || "Gemini AIへの接続に失敗しました") + detail);
   }
-  if (data.recognized === false) return ""; 
-  return normalizeAiPartName(data.partName || data.instrument || data.result || "");
+  if (data.recognized === false) {
+    const raw = data.debug?.rawText ? " Gemini応答:「" + data.debug.rawText + "」" : "";
+    const finish = data.debug?.finishReason ? " finishReason=" + data.debug.finishReason : "";
+    throw new Error((data.message || "AIが楽器名・パート名を特定できませんでした") + raw + finish);
+  }
+  const rawName = data.partName || data.instrument || data.result || "";
+  const normalized = normalizeAiPartName(rawName);
+  if (normalized) return normalized;
+  if (rawName.trim()) return rawName.trim();
+  throw new Error("Geminiの応答に楽器名が含まれていません");
 }
 async function runAIRecognition() {
   if (isRecognizing) return;
