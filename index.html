@@ -121,7 +121,7 @@ transition: transform 0.15s ease;
 <span class="text-[10px] font-bold px-1.5 py-0.5 bg-sky-100 dark:bg-sky-900/40 text-sky-700 dark:text-sky-300 rounded">Gemini AI</span>
 </div>
 <p class="text-xs text-slate-500 dark:text-slate-400 mb-3">
-各ページ上部の楽器名・パート名が印刷された範囲を高解像度画像として切り抜き、Cloudflare Worker経由でGemini AIに送信します。APIキーはWorker側で保護されます。切り抜き画像のみGoogle Geminiへ送信されます。
+各ページ全体を確認し、位置を限定せずに楽器名・パート名を探します。判定できない場合は補助画像でも再確認します。画像はCloudflare Worker経由でGemini AIに送信され、APIキーはWorker側で保護されます。
 </p>
 <button id="btn-auto-detect" class="w-full py-2.5 px-4 bg-amber-500 hover:bg-amber-600 text-white font-medium text-sm rounded-lg shadow-sm flex items-center justify-center space-x-2 transition">
 <i data-lucide="scan-line" class="w-4 h-4"></i>
@@ -210,7 +210,7 @@ A3横長などの見開き譜面を真ん中で独立した2枚のページ（A4
 </div>
 <h3 class="text-base font-semibold text-slate-700 dark:text-slate-200 mb-1">ここにPDF楽譜ファイルをドラッグ＆ドロップ</h3>
 <p class="text-xs text-slate-400 max-w-sm mb-4">またはファイル選択ボタンから読み込んでください（複数可）</p>
-<span class="px-3 py-1 bg-slate-100 dark:bg-slate-700 text-slate-500 text-[11px] rounded-full">Gemini AIによるページ上部の画像認識（切り抜き画像を外部送信します）</span>
+<span class="px-3 py-1 bg-slate-100 dark:bg-slate-700 text-slate-500 text-[11px] rounded-full">Gemini AIによるページ全体の画像認識（ページ画像を外部送信します）</span>
 </div>
 <!-- Pages Grid Container -->
 <div id="pages-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 relative z-10">
@@ -776,22 +776,23 @@ async function runAIRecognition() {
       const pageItem = pageList[i];
       try {
         button.innerHTML = `<span>Gemini AI認識中 ${i + 1}/${pageList.length}</span>`;
-        showToast(`ページ上部を切り抜いて認識中 ${i + 1}/${pageList.length}ページ`, 'info');
-        const headerBlob = await extractPageHeaderBlob(pageItem);
-        const headerBase64 = await blobToBase64(headerBlob);
-        if (!headerBase64) throw new Error('ヘッダー画像を取得できませんでした');
+        showToast(`ページ全体から楽器名を探しています ${i + 1}/${pageList.length}ページ`, 'info');
         let part = '';
         try {
-          part = await requestGeminiPart(headerBase64, pageItem.pageNum);
-        } catch (headerError) {
-          const reason = String(headerError?.message || headerError);
-          if (!reason.includes('Geminiは楽器名を返しませんでした')) throw headerError;
-          console.info(`Page ${pageItem.pageNum}: header crop was UNKNOWN; retrying with full page image.`);
-          button.innerHTML = `<span>ページ全体で再認識中 ${i + 1}/${pageList.length}</span>`;
+          // Do not assume the instrument label is in a fixed corner. Inspect the whole page first.
           const fullPageBlob = await extractPageImageBlob(pageItem);
           const fullPageBase64 = await blobToBase64(fullPageBlob);
           if (!fullPageBase64) throw new Error('ページ全体の画像を取得できませんでした');
           part = await requestGeminiPart(fullPageBase64, pageItem.pageNum);
+        } catch (fullPageError) {
+          const reason = String(fullPageError?.message || fullPageError);
+          if (!reason.includes('Geminiは楽器名を返しませんでした')) throw fullPageError;
+          console.info(`Page ${pageItem.pageNum}: full-page image was UNKNOWN; trying a high-resolution header crop as a secondary fallback.`);
+          button.innerHTML = `<span>補助画像で再認識中 ${i + 1}/${pageList.length}</span>`;
+          const headerBlob = await extractPageHeaderBlob(pageItem);
+          const headerBase64 = await blobToBase64(headerBlob);
+          if (!headerBase64) throw new Error('補助画像を取得できませんでした');
+          part = await requestGeminiPart(headerBase64, pageItem.pageNum);
         }
         if (!part) throw new Error('AIが楽器名・パート名を特定できませんでした');
         let matched = partCategories.find(c => c.toLowerCase() === part.toLowerCase());
