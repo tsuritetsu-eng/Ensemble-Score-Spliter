@@ -750,15 +750,15 @@ async function requestGeminiPart(imageBase64, pageNumber) {
     const requestId = data.requestId ? " [requestId: " + data.requestId + "]" : "";
     throw new Error((data.error || "Gemini AIへの接続に失敗しました") + detail + fields + requestId);
   }
-  if (data.recognized === false) {
-    const raw = data.debug?.rawText ? " Gemini応答:「" + data.debug.rawText + "」" : "";
-    const finish = data.debug?.finishReason ? " finishReason=" + data.debug.finishReason : "";
-    throw new Error((data.message || "AIが楽器名・パート名を特定できませんでした") + raw + finish);
-  }
-  const rawName = data.partName || data.instrument || data.result || "";
-  const normalized = normalizeAiPartName(rawName);
+  const detectedText = String(data.detectedText || data.debug?.detectedText || "").trim();
+  const rawName = data.instrument || data.partName || data.result || "";
+  // Prefer the model's classification, but independently normalize the literal text it read.
+  const normalized = normalizeAiPartName(rawName) || normalizeAiPartName(detectedText);
   if (normalized) return normalized;
-  throw new Error("楽器名リストに該当しない応答でした: " + (rawName.trim() || "空欄"));
+  const detail = detectedText ? " 読み取り文字:「" + detectedText.slice(0, 100) + "」" : "";
+  const raw = data.debug?.rawText ? " Gemini応答:「" + data.debug.rawText.slice(0, 100) + "」" : "";
+  const finish = data.debug?.finishReason ? " finishReason=" + data.debug.finishReason : "";
+  throw new Error((data.message || "AIが楽器名・パート名を特定できませんでした") + detail + raw + finish);
 }
 async function runAIRecognition() {
   if (isRecognizing) return;
