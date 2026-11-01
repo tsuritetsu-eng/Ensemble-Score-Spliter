@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ja" class="h-full">
+<html lang="ja" class="min-h-full">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -45,7 +45,7 @@ transition: transform 0.15s ease;
 }
 </style>
 </head>
-<body class="h-full bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-100 flex flex-col font-sans transition-colors duration-200 selection:bg-brand-500 selection:text-white">
+<body class="min-h-screen bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-100 flex flex-col font-sans transition-colors duration-200 selection:bg-brand-500 selection:text-white md:h-screen md:overflow-hidden">
 <!-- Header -->
 <header class="bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 sticky top-0 z-30 shadow-sm">
 <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
@@ -96,9 +96,9 @@ transition: transform 0.15s ease;
 </div>
 </header>
 <!-- Main Container -->
-<div class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 flex flex-col md:flex-row gap-6 overflow-hidden">
+<div class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 flex flex-col md:flex-row gap-6 overflow-visible md:overflow-hidden md:min-h-0 md:h-[calc(100vh-4rem)]">
 <!-- Sidebar Controls -->
-<aside class="w-full md:w-80 flex-shrink-0 flex flex-col gap-5 overflow-y-auto pr-1">
+<aside class="w-full md:w-80 flex-shrink-0 flex flex-col gap-5 overflow-visible md:overflow-y-auto md:min-h-0 md:pr-1">
 <!-- Add Files Card -->
 <div class="bg-white dark:bg-slate-800 p-4 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700">
 <h2 class="text-sm font-semibold mb-3 flex items-center space-x-2 text-slate-700 dark:text-slate-200">
@@ -173,7 +173,7 @@ A3横長などの見開き譜面を真ん中で独立した2枚のページ（A4
 </div>
 </aside>
 <!-- Main Workspace -->
-<main class="flex-1 flex flex-col min-w-0 bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
+<main class="flex-1 flex flex-col min-w-0 bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden min-h-[60vh] md:min-h-0">
 <!-- Workspace Toolbar -->
 <div class="p-3 bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-700 flex flex-wrap items-center justify-between gap-2">
 <div class="flex items-center space-x-2 text-xs font-medium text-slate-600 dark:text-slate-300">
@@ -202,7 +202,7 @@ A3横長などの見開き譜面を真ん中で独立した2枚のページ（A4
 </div>
 </div>
 <!-- Page Grid Display / Drag & Drop Target -->
-<div id="drop-zone" class="flex-1 p-6 overflow-y-auto relative min-h-[400px]">
+<div id="drop-zone" class="flex-1 p-6 overflow-visible md:overflow-y-auto relative min-h-[400px] md:min-h-0">
 <!-- Empty Drop Banner -->
 <div id="empty-state" class="absolute inset-0 flex flex-col items-center justify-center p-6 text-center">
 <div class="w-20 h-20 bg-brand-50 dark:bg-slate-700 rounded-full flex items-center justify-center mb-4 text-brand-500 dark:text-brand-400">
@@ -299,7 +299,7 @@ toast.className = `fixed bottom-5 right-5 z-50 flex items-center space-x-2 px-4 
 toast.classList.remove('translate-y-20', 'opacity-0');
 setTimeout(() => {
 toast.classList.add('translate-y-20', 'opacity-0');
-}, 3500);
+}, type === 'error' ? 7000 : 3500);
 }
 // Event Listeners Registration
 function setupEventListeners() {
@@ -640,6 +640,7 @@ button.disabled = true;
 button.classList.add('opacity-60', 'cursor-not-allowed');
 let detectedCount = 0;
 let failedCount = 0;
+const failureDetails = [];
 try {
 for (let i = 0; i < pageList.length; i++) {
 const pageItem = pageList[i];
@@ -665,13 +666,24 @@ pageItem.partName = matched;
 detectedCount++;
 } catch (err) {
 failedCount++;
+let reason = err && err.name === 'AbortError'
+? '応答タイムアウト（65秒）'
+: (err && err.message ? String(err.message) : '原因不明のエラー');
+if (/Failed to fetch|NetworkError|Load failed/i.test(reason)) {
+reason = 'Workerに接続できません（公開状態・URL・CORSを確認）';
+}
+failureDetails.push({ page: i + 1, reason: reason.slice(0, 120) });
 console.error(`AI recognition failed on page ${i + 1}:`, err);
 }
 if ((i + 1) % 5 === 0 || i === pageList.length - 1) showToast(`AI認識中 ${i + 1}/${pageList.length}ページ`, 'info');
 }
 renderPartCategories();
 renderPagesGrid();
-showToast(`AI認識完了：${detectedCount}ページ成功${failedCount ? `、${failedCount}ページ失敗` : ''}`, failedCount ? 'error' : 'success');
+const firstFailure = failureDetails[0];
+const failureSummary = firstFailure
+? `（例：P${firstFailure.page} ${firstFailure.reason}）`
+: '';
+showToast(`AI認識完了：${detectedCount}ページ成功${failedCount ? `、${failedCount}ページ失敗 ${failureSummary}` : ''}`, failedCount ? 'error' : 'success');
 } finally {
 isRecognizing = false;
 button.disabled = false;
