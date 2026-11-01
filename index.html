@@ -264,7 +264,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs
 const GEMINI_WORKER_URL = "https://sheet-music-parser.mrtsuritetsu.workers.dev";
 // State Management
 let pageList = []; // { id, originalPdfIndex, pageNum, pdfBuffer, rotation, cropBox, partName, selected, width, height }
-let partCategories = ['すべて', 'Full Score', 'Flute', 'Oboe', 'Clarinet', 'Bassoon', 'Saxophone', 'Horn', 'Trumpet', 'Trombone', 'Tuba', 'Violin', 'Viola', 'Cello', 'Contrabass', 'Percussion', '未分類'];
+let partCategories = ['すべて', 'Full Score', 'Flute', 'Piccolo', 'Oboe', 'English Horn', 'Bassoon', 'E♭ Clarinet', 'B♭ Clarinet', 'Alto Clarinet', 'Bass Clarinet', 'Contrabass Clarinet', 'Soprano Saxophone', 'Alto Saxophone', 'Tenor Saxophone', 'Baritone Saxophone', 'Trumpet', 'Cornet', 'Flugelhorn', 'French Horn', 'Trombone', 'Bass Trombone', 'Euphonium', 'Tuba', 'Double Bass', 'Glockenspiel', 'Xylophone', 'Marimba', 'Vibraphone', 'Tubular Bells', 'Timpani', 'Snare Drum', 'Bass Drum', 'Crash Cymbals', 'Suspended Cymbal', 'Tambourine', 'Triangle', 'Tam-tam', 'Wood Block', 'Castanets', 'Shaker', 'Drum Set', 'Piano', 'Harp', 'Electric Bass', '未分類'];
 let activePartFilter = 'すべて';
 let draggedPageIndex = null;
 let activeCropPageIndex = null;
@@ -640,30 +640,51 @@ function blobToDataUrl(blob) {
 }
 function normalizeAiPartName(value) {
   if (typeof value !== "string") return "";
-  const text = value.replace(/\s+/g, " ").trim();
+  const text = value.replace(/\\s+/g, " ").trim();
   const rules = [
-    ["Full Score", /full\s*score|conductor|総譜|指揮者用|スコア/i],
-    ["Piccolo", /piccolo|ピッコロ/i],
-    ["Flute", /flute|フルート/i],
-    ["Oboe", /oboe|オーボエ/i],
-    ["English Horn", /english\s*horn|cor\s*anglais|イングリッシュホルン/i],
-    ["Bass Clarinet", /bass\s*clarinet|バスクラリネット/i],
-    ["Clarinet", /clarinet|クラリネット/i],
-    ["Bassoon", /bassoon|ファゴット/i],
-    ["Saxophone", /saxophone|soprano\s*sax|alto\s*sax|tenor\s*sax|baritone\s*sax|サクソフォン|サックス/i],
-    ["Horn", /french\s*horn|ホルン/i],
-    ["Trumpet", /trumpet|トランペット/i],
-    ["Trombone", /trombone|トロンボーン/i],
-    ["Euphonium", /euphonium|ユーフォニアム/i],
-    ["Tuba", /tuba|チューバ/i],
-    ["Violin", /violin|ヴァイオリン|バイオリン/i],
-    ["Viola", /viola|ヴィオラ/i],
-    ["Cello", /cello|violoncello|チェロ/i],
-    ["Contrabass", /contrabass|double\s*bass|コントラバス/i],
-    ["Percussion", /percussion|打楽器|パーカッション/i],
-    ["Timpani", /timpani|ティンパニ/i],
-    ["Piano", /piano|ピアノ/i],
-    ["Harp", /harp|ハープ/i]
+    ["Full Score", /full\\s*score|conductor|総譜|指揮者用|スコア/i],
+    ["Contrabass Clarinet", /contrabass\\s*clarinet|c\\.?b\\.?\\s*cl\\.?|コントラバスクラリネット/i],
+    ["Bass Clarinet", /bass\\s*clarinet|b\\.?\\s*cl\\.?|バスクラリネット/i],
+    ["Alto Clarinet", /alto\\s*clarinet|a\\.?\\s*cl\\.?|アルトクラリネット/i],
+    ["E♭ Clarinet", /e[♭b-]?\\s*flat?\\s*clarinet|e[♭b]\\s*cl\\.?|e-?flat\\s*cl\\.?|エスクラリネット/i],
+    ["B♭ Clarinet", /b[♭b]\\s*clarinet|b[♭b]\\s*cl\\.?|b-?flat\\s*cl\\.?|clarinet|クラリネット/i],
+    ["English Horn", /english\\s*horn|cor\\s*anglais|e\\.?h\\.?|イングリッシュホルン/i],
+    ["Bassoon", /bassoon|bsn\\.?|ファゴット/i],
+    ["Piccolo", /piccolo|picc\\.?|ピッコロ/i],
+    ["Flute", /flute|fl\\.?|フルート/i],
+    ["Soprano Saxophone", /soprano\\s*sax(?:ophone)?|s\\.?\\s*sax\\.?|ソプラノサックス/i],
+    ["Alto Saxophone", /alto\\s*sax(?:ophone)?|a\\.?\\s*sax\\.?|アルトサックス/i],
+    ["Tenor Saxophone", /tenor\\s*sax(?:ophone)?|t\\.?\\s*sax\\.?|テナーサックス/i],
+    ["Baritone Saxophone", /baritone\\s*sax(?:ophone)?|b\\.?\\s*sax\\.?|バリトンサックス/i],
+    ["French Horn", /french\\s*horn|horn|f\\.?\\s*horn|h[n.]?\\s*[1-4]?|ホルン/i],
+    ["Bass Trombone", /bass\\s*trombone|b\\.?\\s*tbn\\.?|b\\.?\\s*trb\\.?|バストロンボーン/i],
+    ["Trombone", /trombone|tbn\\.?|trb\\.?|トロンボーン/i],
+    ["Trumpet", /trumpet|tpt\\.?|tp\\.?|トランペット/i],
+    ["Cornet", /cornet|cnt\\.?|コルネット/i],
+    ["Flugelhorn", /flugelhorn|flg\\.?|フリューゲルホルン/i],
+    ["Euphonium", /euphonium|euph\\.?|ユーフォニアム/i],
+    ["Tuba", /tuba|tub\\.?|チューバ/i],
+    ["Double Bass", /double\\s*bass|contrabass|string\\s*bass|c\\.?b\\.?|st\\.?\\s*bass|コントラバス/i],
+    ["Glockenspiel", /glockenspiel|glock\\.?|グロッケン/i],
+    ["Xylophone", /xylophone|xyl\\.?|シロフォン|木琴/i],
+    ["Marimba", /marimba|mar\\.?|マリンバ/i],
+    ["Vibraphone", /vibraphone|vib\\.?|ヴィブラフォン/i],
+    ["Tubular Bells", /tubular\\s*bells?|chimes|チューブラーベル|チャイム/i],
+    ["Timpani", /timpani|timp\\.?|ティンパニ/i],
+    ["Snare Drum", /snare\\s*drum|s\\.?d\\.?|スネアドラム/i],
+    ["Bass Drum", /bass\\s*drum|b\\.?d\\.?|バスドラム/i],
+    ["Crash Cymbals", /crash\\s*cymbals?|cym\\.?|クラッシュシンバル/i],
+    ["Suspended Cymbal", /suspended\\s*cymbal|sus\\.?\\s*cym\\.?|サスペンドシンバル/i],
+    ["Tambourine", /tambourine|tamb\\.?|タンバリン/i],
+    ["Triangle", /triangle|tri\\.?|トライアングル/i],
+    ["Tam-tam", /tam[- ]?tam|gong|タムタム|ゴング/i],
+    ["Wood Block", /wood\\s*block|ウッドブロック/i],
+    ["Castanets", /castanets|カスタネット/i],
+    ["Shaker", /shaker|maracas|シェイカー|マラカス/i],
+    ["Drum Set", /drum\\s*set|drums|ドラムセット/i],
+    ["Piano", /piano|pf\\.?|ピアノ/i],
+    ["Harp", /harp|hp\\.?|ハープ/i],
+    ["Electric Bass", /electric\\s*bass|e\\.?\\s*bass|エレキベース/i]
   ];
   for (const [category, pattern] of rules) {
     if (pattern.test(text)) return category;
@@ -736,7 +757,7 @@ async function requestGeminiPart(imageBase64, pageNumber) {
   const rawName = data.partName || data.instrument || data.result || "";
   const normalized = normalizeAiPartName(rawName);
   if (normalized) return normalized;
-  if (rawName.trim()) return rawName.trim();
+  throw new Error("楽器名リストに該当しない応答でした: " + (rawName.trim() || "空欄"));
   throw new Error("Geminiの応答に楽器名が含まれていません");
 }
 async function runAIRecognition() {
@@ -762,10 +783,7 @@ async function runAIRecognition() {
         const part = await requestGeminiPart(imageBase64, pageItem.pageNum);
         if (!part) throw new Error('AIが楽器名・パート名を特定できませんでした');
         let matched = partCategories.find(c => c.toLowerCase() === part.toLowerCase());
-        if (!matched) {
-          partCategories.splice(Math.max(1, partCategories.length - 1), 0, part);
-          matched = part;
-        }
+        if (!matched) throw new Error("登録済みの楽器名に一致しません: " + part);
         pageItem.partName = matched;
         detectedCount++;
       } catch (err) {
