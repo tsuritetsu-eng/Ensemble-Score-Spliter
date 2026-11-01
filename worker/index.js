@@ -162,14 +162,15 @@ export default {
     const pageLabel = Number.isInteger(pageNumber) && pageNumber > 0 ? String(pageNumber) : "unknown";
 
     const prompt = [
-      "You are an expert at identifying concert band and wind ensemble instrument labels on sheet music.",
-      "The attached image may be a full-page image or a supplementary crop from one sheet-music page. The instrument/part label can appear anywhere: top or bottom, left or right margin, center, above or below the staff, or in a boxed/stamped area. Do NOT assume it is in the upper-left or at the top. Scan the entire supplied image systematically and locate the label that identifies the part for this page. Distinguish it from the composition title, composer, arranger, publisher, copyright, page number, watermark, and instrument names that appear only as musical text or instructions.",
-      "Classify the label into exactly ONE canonical instrument name from this closed list. Return the canonical name only; never return an abbreviation or any text outside this list:",
-      "Flute; Piccolo; Oboe; English Horn; Bassoon; E♭ Clarinet; B♭ Clarinet; Alto Clarinet; Bass Clarinet; Contrabass Clarinet; Soprano Saxophone; Alto Saxophone; Tenor Saxophone; Baritone Saxophone; Trumpet; Cornet; Flugelhorn; French Horn; Trombone; Bass Trombone; Euphonium; Tuba; Double Bass; Glockenspiel; Xylophone; Marimba; Vibraphone; Tubular Bells; Timpani; Snare Drum; Bass Drum; Crash Cymbals; Suspended Cymbal; Tambourine; Triangle; Tam-tam; Wood Block; Castanets; Shaker; Drum Set; Piano; Harp; Electric Bass.",
-      "Recognize common abbreviations and variants: Fl., Picc., Ob., E.H., Bsn., E♭ Cl., B♭ Cl., A.Cl., B.Cl., C.B.Cl., S.Sax., A.Sax., T.Sax., B.Sax., Tpt., Tp., Cnt., Flg., Hn., Tbn., Trb., B.Tbn., B.Trb., Euph., Tub., C.B., St.Bass, Glock., Xyl., Mar., Vib., Timp., S.D., B.D., Cym., Sus.Cym., Tamb., Tri., Pf., Hp., E.Bass.",
-      "Ignore transposing-key prefixes such as C, B♭, E♭ when they precede an instrument name. Keep the instrument classification canonical and omit part numbers such as 1, 2, 3, or 4.",
-      "The printed part label is expected to be one of the instruments in this list. Even if the label is faint, cropped, abbreviated, or partly unreadable, choose the single closest matching instrument using the visible letter shapes and abbreviation patterns. Do not require a perfect spelling.",
-      "Do not output UNKNOWN merely because the text is abbreviated or blurry. Output UNKNOWN only if there is no plausible instrument/part label visible anywhere in the image. Output exactly one canonical list item or UNKNOWN, with no explanation."
+      "You are reading the printed instrument/part label on a concert band sheet-music page.",
+      "First locate the page's own instrument/part label anywhere on the image: top, bottom, left, right, center, near a staff, or inside a stamp/box. Do not mistake the composition title, composer, publisher, copyright, page number, watermark, or musical instructions for the part label.",
+      "Stage 1: transcribe the instrument/part label as literally as possible into detectedText. Preserve useful words such as C, B-flat, E-flat, Bass, Trombone, Oboe, and part numbers. If part of it is unclear, include the readable portion rather than discarding the whole label.",
+      "Stage 2: classify that text into exactly one canonical instrument name from this closed list. Ignore transposition prefixes such as C, B♭, E♭ and omit part numbers. Use the closest plausible instrument when the label is partly blurred, abbreviated, or obscured.",
+      "Canonical list: Flute; Piccolo; Oboe; English Horn; Bassoon; E♭ Clarinet; B♭ Clarinet; Alto Clarinet; Bass Clarinet; Contrabass Clarinet; Soprano Saxophone; Alto Saxophone; Tenor Saxophone; Baritone Saxophone; Trumpet; Cornet; Flugelhorn; French Horn; Trombone; Bass Trombone; Euphonium; Tuba; Double Bass; Glockenspiel; Xylophone; Marimba; Vibraphone; Tubular Bells; Timpani; Snare Drum; Bass Drum; Crash Cymbals; Suspended Cymbal; Tambourine; Triangle; Tam-tam; Wood Block; Castanets; Shaker; Drum Set; Piano; Harp; Electric Bass.",
+      "Common abbreviations include Fl., Picc., Ob., E.H., Bsn., E♭ Cl., B♭ Cl., A.Cl., B.Cl., Tpt., Tp., Tbn., Trb., B.Tbn., B.Trb., Euph., Tub., S.Sax., A.Sax., T.Sax., B.Sax., Glock., Xyl., Mar., Vib., Timp., S.D., B.D., Cym., Tamb., Tri., Pf., Hp., E.Bass.",
+      "Return ONLY valid JSON with exactly these keys: detectedText (string), instrument (canonical list item or empty string), confidence (high, medium, or low). If no plausible part label is visible, use empty detectedText, empty instrument, and low confidence. Never return the word UNKNOWN.",
+      "Example: for 'C Trombone II', return {\"detectedText\":\"C Trombone II\",\"instrument\":\"Trombone\",\"confidence\":\"high\"}. For 'Bass Trombone (bra)', return {\"detectedText\":\"Bass Trombone\",\"instrument\":\"Bass Trombone\",\"confidence\":\"medium\"}.",
+      "This is source sheet-music page " + pageLabel + "."
     ].join(" ");
 
     const controller = new AbortController();
@@ -194,8 +195,8 @@ export default {
           }],
           generationConfig: {
             temperature: 0.1,
-            maxOutputTokens: 48,
-            responseMimeType: "text/plain"
+            maxOutputTokens: 160,
+            responseMimeType: "application/json"
           }
         }),
         signal: controller.signal
@@ -257,31 +258,34 @@ export default {
 
     const content = result?.candidates?.[0]?.content?.parts;
     const rawText = Array.isArray(content)
-      ? content.map(part => typeof part?.text === "string" ? part.text : "").join(" ")
+      ? content.map(part => typeof part?.text === "string" ? part.text : "").join(" ").trim()
       : "";
-    const partName = cleanPartName(rawText);
-
-    if (!partName || partName.toUpperCase() === "UNKNOWN") {
-      const candidate = result?.candidates?.[0] || {};
-      return jsonResponse({
-        partName: "",
-        recognized: false,
-        message: "Geminiは楽器名を返しませんでした",
-        model: GEMINI_MODEL,
-        requestId,
-        debug: {
-          rawText: rawText.slice(0, 120),
-          finishReason: candidate.finishReason || null,
-          promptBlocked: Boolean(result?.promptFeedback?.blockReason)
-        }
-      }, 200, origin);
-    }
+    const candidate = result?.candidates?.[0] || {};
+    let parsed = null;
+    try {
+      const jsonMatch = rawText.match(/\\{[\\s\\S]*\\}/);
+      if (jsonMatch) parsed = JSON.parse(jsonMatch[0]);
+    } catch (_) {}
+    const detectedText = cleanPartName(parsed?.detectedText || "");
+    const instrument = cleanPartName(parsed?.instrument || "");
+    const confidence = ["high", "medium", "low"].includes(String(parsed?.confidence || "").toLowerCase())
+      ? String(parsed.confidence).toLowerCase()
+      : "low";
 
     return jsonResponse({
-      partName,
-      recognized: true,
+      detectedText,
+      instrument,
+      partName: instrument,
+      confidence,
+      recognized: Boolean(instrument || detectedText),
+      message: instrument ? "" : "楽器名を確定できませんでした",
       model: GEMINI_MODEL,
-      requestId
+      requestId,
+      debug: {
+        rawText: rawText.slice(0, 240),
+        finishReason: candidate.finishReason || null,
+        promptBlocked: Boolean(result?.promptFeedback?.blockReason)
+      }
     }, 200, origin);
   }
 };
