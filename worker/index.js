@@ -148,7 +148,7 @@ export default {
 
     let pdf;
     try {
-      pdf = parsePdf(payload?.pdf);
+      pdf = parsePdf(payload?.pdf ?? payload?.pdfBase64 ?? payload?.document ?? payload?.data);
     } catch (error) {
       const messages = {
         PDF_REQUIRED: "PDF data is required",
@@ -157,6 +157,7 @@ export default {
       };
       return jsonResponse({
         error: messages[error.message] || "Invalid PDF data",
+        receivedFields: payload && typeof payload === "object" ? Object.keys(payload) : [],
         requestId
       }, 400, origin);
     }
