@@ -787,12 +787,21 @@ async function runAIRecognition() {
         } catch (fullPageError) {
           const reason = String(fullPageError?.message || fullPageError);
           if (!reason.includes('Geminiは楽器名を返しませんでした')) throw fullPageError;
-          console.info(`Page ${pageItem.pageNum}: full-page image was UNKNOWN; trying a high-resolution header crop as a secondary fallback.`);
-          button.innerHTML = `<span>補助画像で再認識中 ${i + 1}/${pageList.length}</span>`;
-          const headerBlob = await extractPageHeaderBlob(pageItem);
-          const headerBase64 = await blobToBase64(headerBlob);
-          if (!headerBase64) throw new Error('補助画像を取得できませんでした');
-          part = await requestGeminiPart(headerBase64, pageItem.pageNum);
+          console.info(`Page ${pageItem.pageNum}: full-page image was UNKNOWN; scanning enlarged page tiles.`);
+          button.innerHTML = `<span>拡大領域を順番に確認中 ${i + 1}/${pageList.length}</span>`;
+          const tileBlobs = await extractPageTileBlobs(pageItem);
+          let tileErrors = [];
+          for (let tileIndex = 0; tileIndex < tileBlobs.length; tileIndex++) {
+            try {
+              const tileBase64 = await blobToBase64(tileBlobs[tileIndex]);
+              if (!tileBase64) throw new Error('拡大領域画像を取得できませんでした');
+              part = await requestGeminiPart(tileBase64, pageItem.pageNum);
+              if (part) break;
+            } catch (tileError) {
+              tileErrors.push(String(tileError?.message || tileError));
+            }
+          }
+          if (!part) throw new Error(tileErrors[tileErrors.length - 1] || 'ページ全体と拡大領域の両方で楽器名を認識できませんでした');
         }
         if (!part) throw new Error('AIが楽器名・パート名を特定できませんでした');
         let matched = partCategories.find(c => c.toLowerCase() === part.toLowerCase());
@@ -861,6 +870,64 @@ async function extractPageImageBlob(pageItem) {
     if (page) { try { page.cleanup(); } catch (_) {} }
     if (pdfDoc) { try { await pdfDoc.destroy(); } catch (_) {} }
     if (canvas) { canvas.width = 0; canvas.height = 0; canvas = null; }
+  }
+}
+// ページ全体を3×3に分割し、各領域を拡大して認識用Blobとして返す
+async function extractPageTileBlobs(pageItem) {
+  let pdfDoc = null;
+  let page = null;
+  let sourceCanvas = null;
+  try {
+    pdfDoc = await pdfjsLib.getDocument({
+      data: new Uint8Array(pageItem.pdfBuffer.slice(0)),
+      maxImageSize: 8400000
+    }).promise;
+    page = await pdfDoc.getPage(pageItem.pageNum);
+    const base = page.getViewport({ scale: 1 });
+    const scale = Math.min(2.5, 3200 / Math.max(base.width, base.height), Math.sqrt(8400000 / (base.width * base.height)));
+    const viewport = page.getViewport({ scale: Math.max(1, scale) });
+    sourceCanvas = document.createElement('canvas');
+    sourceCanvas.width = Math.ceil(viewport.width);
+    sourceCanvas.height = Math.ceil(viewport.height);
+    const ctx = sourceCanvas.getContext('2d', { alpha: false });
+    if (!ctx) throw new Error('拡大画像を初期化できません');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, sourceCanvas.width, sourceCanvas.height);
+    await page.render({ canvasContext: ctx, viewport }).promise;
+
+    const blobs = [];
+    const cols = 3, rows = 3, overlap = 0.12;
+    for (let row = 0; row < rows; row++) {
+      for (let col = 0; col < cols; col++) {
+        const cellW = sourceCanvas.width / cols;
+        const cellH = sourceCanvas.height / rows;
+        const sx = Math.max(0, Math.floor(col * cellW - cellW * overlap / 2));
+        const sy = Math.max(0, Math.floor(row * cellH - cellH * overlap / 2));
+        const ex = Math.min(sourceCanvas.width, Math.ceil((col + 1) * cellW + cellW * overlap / 2));
+        const ey = Math.min(sourceCanvas.height, Math.ceil((row + 1) * cellH + cellH * overlap / 2));
+        const sw = ex - sx, sh = ey - sy;
+        const tile = document.createElement('canvas');
+        const factor = Math.min(1.8, 1500 / Math.max(sw, sh));
+        tile.width = Math.max(1, Math.ceil(sw * factor));
+        tile.height = Math.max(1, Math.ceil(sh * factor));
+        const tileCtx = tile.getContext('2d', { alpha: false });
+        if (!tileCtx) throw new Error('領域画像を初期化できません');
+        tileCtx.fillStyle = '#ffffff';
+        tileCtx.fillRect(0, 0, tile.width, tile.height);
+        tileCtx.drawImage(sourceCanvas, sx, sy, sw, sh, 0, 0, tile.width, tile.height);
+        const blob = await new Promise((resolve, reject) => {
+          tile.toBlob(value => value ? resolve(value) : reject(new Error('領域画像の圧縮に失敗しました')), 'image/jpeg', 0.94);
+        });
+        blobs.push(blob);
+        tile.width = 0;
+        tile.height = 0;
+      }
+    }
+    return blobs;
+  } finally {
+    if (page) { try { page.cleanup(); } catch (_) {} }
+    if (pdfDoc) { try { await pdfDoc.destroy(); } catch (_) {} }
+    if (sourceCanvas) { sourceCanvas.width = 0; sourceCanvas.height = 0; }
   }
 }
 // ページ上部を高解像度で切り出し（通常認識で判定できなかった場合のみ使用）
