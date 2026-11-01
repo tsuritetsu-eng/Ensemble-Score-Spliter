@@ -764,7 +764,7 @@ async function runAIRecognition() {
   try {
     showToast('端末内OCRエンジンを準備しています…', 'info');
     worker = await Tesseract.createWorker('eng');
-    await worker.setParameters({ preserve_interword_spaces: '1' });
+    await worker.setParameters({ preserve_interword_spaces: '1', tessedit_pageseg_mode: '11', user_defined_dpi: '300' });
     for (let i = 0; i < pageList.length; i++) {
       const pageItem = pageList[i];
       try {
@@ -906,12 +906,12 @@ async function extractPageLabelBlobs(pageItem) {
   try {
     pdfDoc = await pdfjsLib.getDocument({
       data: new Uint8Array(pageItem.pdfBuffer.slice(0)),
-      maxImageSize: 8400000
+      maxImageSize: 10000000
     }).promise;
     page = await pdfDoc.getPage(pageItem.pageNum);
     const base = page.getViewport({ scale: 1 });
-    const scale = Math.min(3.2, 3200 / Math.max(base.width, base.height), Math.sqrt(8400000 / (base.width * base.height)));
-    const viewport = page.getViewport({ scale: Math.max(1, scale) });
+    const scale = Math.min(4, 3600 / Math.max(base.width, base.height), Math.sqrt(10000000 / (base.width * base.height)));
+    const viewport = page.getViewport({ scale: Math.max(1.5, scale) });
     sourceCanvas = document.createElement('canvas');
     sourceCanvas.width = Math.ceil(viewport.width);
     sourceCanvas.height = Math.ceil(viewport.height);
@@ -921,28 +921,49 @@ async function extractPageLabelBlobs(pageItem) {
     ctx.fillRect(0, 0, sourceCanvas.width, sourceCanvas.height);
     await page.render({ canvasContext: ctx, viewport }).promise;
 
+    // Six focused label windows: top row and bottom row, each split into left/center/right.
+    // Narrower vertical bands keep the instrument text larger than a full half-page crop.
     const regions = [
-      { x: 0, y: 0 }, { x: 1, y: 0 }, { x: 2, y: 0 },
-      { x: 0, y: 1 }, { x: 1, y: 1 }, { x: 2, y: 1 }
+      { x: 0, y: 0.02 }, { x: 1, y: 0.02 }, { x: 2, y: 0.02 },
+      { x: 0, y: 0.70 }, { x: 1, y: 0.70 }, { x: 2, y: 0.70 }
     ];
     const cellW = sourceCanvas.width / 3;
-    const cellH = sourceCanvas.height / 2;
+    const cropH = Math.ceil(sourceCanvas.height * 0.28);
     for (const region of regions) {
       const sx = Math.floor(region.x * cellW);
-      const sy = Math.floor(region.y * cellH);
+      const sy = Math.floor(region.y * sourceCanvas.height);
       const sw = Math.min(sourceCanvas.width - sx, Math.ceil(cellW));
-      const sh = Math.min(sourceCanvas.height - sy, Math.ceil(cellH));
+      const sh = Math.min(sourceCanvas.height - sy, cropH);
       const crop = document.createElement('canvas');
-      const factor = Math.min(1.6, 1800 / Math.max(sw, sh));
+      const factor = Math.min(2.2, 2400 / Math.max(sw, sh));
       crop.width = Math.max(1, Math.ceil(sw * factor));
       crop.height = Math.max(1, Math.ceil(sh * factor));
       const cropCtx = crop.getContext('2d', { alpha: false });
       if (!cropCtx) throw new Error('切り抜き画像を初期化できません');
       cropCtx.fillStyle = '#ffffff';
       cropCtx.fillRect(0, 0, crop.width, crop.height);
+      cropCtx.imageSmoothingEnabled = true;
+      cropCtx.imageSmoothingQuality = 'high';
       cropCtx.drawImage(sourceCanvas, sx, sy, sw, sh, 0, 0, crop.width, crop.height);
+
+      // Improve faint print and small lettering with grayscale contrast enhancement.
+      const image = cropCtx.getImageData(0, 0, crop.width, crop.height);
+      const pixels = image.data;
+      let sum = 0;
+      for (let p = 0; p < pixels.length; p += 4) {
+        const gray = Math.round(0.299 * pixels[p] + 0.587 * pixels[p + 1] + 0.114 * pixels[p + 2]);
+        sum += gray;
+      }
+      const average = sum / (pixels.length / 4);
+      const threshold = Math.max(145, Math.min(205, average - 24));
+      for (let p = 0; p < pixels.length; p += 4) {
+        const gray = Math.round(0.299 * pixels[p] + 0.587 * pixels[p + 1] + 0.114 * pixels[p + 2]);
+        const enhanced = gray < threshold ? 0 : 255;
+        pixels[p] = pixels[p + 1] = pixels[p + 2] = enhanced;
+      }
+      cropCtx.putImageData(image, 0, 0);
       const blob = await new Promise((resolve, reject) => {
-        crop.toBlob(value => value ? resolve(value) : reject(new Error('切り抜き画像の作成に失敗しました')), 'image/jpeg', 0.95);
+        crop.toBlob(value => value ? resolve(value) : reject(new Error('切り抜き画像の作成に失敗しました')), 'image/png');
       });
       crops.push(blob);
       crop.width = 0;
@@ -955,6 +976,7 @@ async function extractPageLabelBlobs(pageItem) {
     if (sourceCanvas) { sourceCanvas.width = 0; sourceCanvas.height = 0; }
   }
 }
+
 async function extractPageHeaderBlob(pageItem) {
   let pdfDoc = null;
   let page = null;
