@@ -657,7 +657,7 @@ body: JSON.stringify({ image: headerBase64 }), signal: controller.signal
 });
 } finally { clearTimeout(timeoutId); }
 const payload = await response.json().catch(() => ({}));
-if (!response.ok) { const upstream = payload.upstreamStatus ? ` / NVIDIA HTTP ${payload.upstreamStatus}` : ''; throw new Error(`${payload.error || payload.details || 'Worker error'} (HTTP ${response.status}${upstream})`); }
+if (!response.ok) { const upstream = payload.upstreamStatus ? ` / NVIDIA HTTP ${payload.upstreamStatus}` : ''; const detail = payload.details ? ` / 詳細: ${String(payload.details).slice(0, 240)}` : ''; throw new Error(`${payload.error || 'Worker error'} (HTTP ${response.status}${upstream}${detail})`); }
 const part = String(payload.partName || '').replace(/[\u0000-\u001f]/g, '').trim().replace(/^['\"]|['\"]$/g, '').slice(0, 80);
 if (!part) throw new Error('パート名を読み取れませんでした');
 let matched = partCategories.find(c => c.toLowerCase() === part.toLowerCase());
