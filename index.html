@@ -730,7 +730,7 @@ async function runAIRecognition() {
     const failureSummary = firstFailure ? `（例：P${firstFailure.page} ${firstFailure.reason}）` : '';
     showToast(`Gemini AI認識完了：${detectedCount}ページ成功${failedCount ? `、${failedCount}ページ失敗 ${failureSummary}` : ''}`, failedCount ? 'error' : 'success');
   } catch (err) {
-    console.error('NVIDIA AI recognition failed:', err);
+    console.error('Gemini AI recognition failed:', err);
     showToast('Gemini AI認識に失敗しました。Workerの設定とAPI利用枠を確認してください。', 'error');
   } finally {
     isRecognizing = false;
