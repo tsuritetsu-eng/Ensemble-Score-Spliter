@@ -118,14 +118,14 @@ transition: transform 0.15s ease;
 <i data-lucide="sparkles" class="w-4 h-4 text-amber-500"></i>
 <span>AI パート自動認識</span>
 </h2>
-<span class="text-[10px] font-bold px-1.5 py-0.5 bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400 rounded">無料・端末内OCR</span>
+<span class="text-[10px] font-bold px-1.5 py-0.5 bg-sky-100 dark:bg-sky-900/40 text-sky-700 dark:text-sky-300 rounded">NVIDIA AI・試験利用</span>
 </div>
 <p class="text-xs text-slate-500 dark:text-slate-400 mb-3">
-各楽譜ページを高解像度で画像化し、ヘッダーに限定せずページ全体から楽器名・パート名をOCRで探します。画像は外部サーバーへ送信せず、このブラウザ内で処理します（初回のみOCRモデルをダウンロード）。
+各楽譜ページの画像をCloudflare Worker経由でNVIDIAの画像対応AIに送り、楽器名・パート名を判定します。APIキーはWorker側で保護されます。画像はAI認識のためNVIDIAへ送信されます。無料枠での試験利用を想定しています。
 </p>
 <button id="btn-auto-detect" class="w-full py-2.5 px-4 bg-amber-500 hover:bg-amber-600 text-white font-medium text-sm rounded-lg shadow-sm flex items-center justify-center space-x-2 transition">
 <i data-lucide="scan-line" class="w-4 h-4"></i>
-<span>パート名を自動認識実行</span>
+<span>NVIDIA AIでパート名を認識</span>
 </button>
 </div>
 <!-- A3 Spread Split (pdfsplit style) -->
@@ -210,7 +210,7 @@ A3横長などの見開き譜面を真ん中で独立した2枚のページ（A4
 </div>
 <h3 class="text-base font-semibold text-slate-700 dark:text-slate-200 mb-1">ここにPDF楽譜ファイルをドラッグ＆ドロップ</h3>
 <p class="text-xs text-slate-400 max-w-sm mb-4">またはファイル選択ボタンから読み込んでください（複数可）</p>
-<span class="px-3 py-1 bg-slate-100 dark:bg-slate-700 text-slate-500 text-[11px] rounded-full">ブラウザ内で無料OCR処理（画像は外部送信されません）</span>
+<span class="px-3 py-1 bg-slate-100 dark:bg-slate-700 text-slate-500 text-[11px] rounded-full">NVIDIA AIによる試験認識（画像を外部送信します）</span>
 </div>
 <!-- Pages Grid Container -->
 <div id="pages-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 relative z-10">
@@ -261,8 +261,7 @@ A3横長などの見開き譜面を真ん中で独立した2枚のページ（A4
 // PDF.js Worker Init
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 // PaddleOCR.js: free, in-browser OCR (no API key or server required)
-const PADDLE_OCR_CDN = "https://cdn.jsdelivr.net/npm/@paddleocr/paddleocr-js@0.4.2/+esm";
-let paddleOcrPromise = null;
+const NVIDIA_WORKER_URL = "https://sheet-music-parser.mrtsuritetsu.workers.dev";
 // State Management
 let pageList = []; // { id, originalPdfIndex, pageNum, pdfBuffer, rotation, cropBox, partName, selected, width, height }
 let partCategories = ['すべて', 'Full Score', 'Flute', 'Oboe', 'Clarinet', 'Bassoon', 'Saxophone', 'Horn', 'Trumpet', 'Trombone', 'Tuba', 'Violin', 'Viola', 'Cello', 'Contrabass', 'Percussion', '未分類'];
@@ -630,214 +629,198 @@ pageList = pageList.filter(p => !p.selected);
 renderPagesGrid();
 renderPartCategories();
 }
-// PaddleOCR.js: recognize text across the full page image
-async function getPaddleOcr() {
-if (!paddleOcrPromise) {
-paddleOcrPromise = (async () => {
-const { PaddleOCR } = await import(PADDLE_OCR_CDN);
-return await PaddleOCR.create({
-lang: "japan",
-ocrVersion: "PP-OCRv6",
-ortOptions: { backend: "auto" }
-});
-})();
+// NVIDIA Vision AI: send rendered page images through the Cloudflare Worker
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("画像データを読み込めませんでした"));
+    reader.readAsDataURL(blob);
+  });
 }
-try { return await paddleOcrPromise; }
-catch (error) { paddleOcrPromise = null; throw error; }
+function normalizeAiPartName(value) {
+  if (typeof value !== "string") return "";
+  const text = value.replace(/\s+/g, " ").trim();
+  const rules = [
+    ["Full Score", /full\s*score|conductor|総譜|指揮者用|スコア/i],
+    ["Piccolo", /piccolo|ピッコロ/i],
+    ["Flute", /flute|フルート/i],
+    ["Oboe", /oboe|オーボエ/i],
+    ["English Horn", /english\s*horn|cor\s*anglais|イングリッシュホルン/i],
+    ["Bass Clarinet", /bass\s*clarinet|バスクラリネット/i],
+    ["Clarinet", /clarinet|クラリネット/i],
+    ["Bassoon", /bassoon|ファゴット/i],
+    ["Saxophone", /saxophone|soprano\s*sax|alto\s*sax|tenor\s*sax|baritone\s*sax|サクソフォン|サックス/i],
+    ["Horn", /french\s*horn|ホルン/i],
+    ["Trumpet", /trumpet|トランペット/i],
+    ["Trombone", /trombone|トロンボーン/i],
+    ["Euphonium", /euphonium|ユーフォニアム/i],
+    ["Tuba", /tuba|チューバ/i],
+    ["Violin", /violin|ヴァイオリン|バイオリン/i],
+    ["Viola", /viola|ヴィオラ/i],
+    ["Cello", /cello|violoncello|チェロ/i],
+    ["Contrabass", /contrabass|double\s*bass|コントラバス/i],
+    ["Percussion", /percussion|打楽器|パーカッション/i],
+    ["Timpani", /timpani|ティンパニ/i],
+    ["Piano", /piano|ピアノ/i],
+    ["Harp", /harp|ハープ/i]
+  ];
+  for (const [category, pattern] of rules) {
+    if (pattern.test(text)) return category;
+  }
+  return "";
 }
-function identifyPartFromOcr(items) {
-const lines = (Array.isArray(items) ? items : [])
-.filter(item => item && typeof item.text === "string" && Number(item.score ?? 0) >= 0.08)
-.sort((a, b) => {
-const ay = Array.isArray(a.poly) ? a.poly.reduce((n, p) => n + (p?.[1] || 0), 0) / a.poly.length : 0;
-const by = Array.isArray(b.poly) ? b.poly.reduce((n, p) => n + (p?.[1] || 0), 0) / b.poly.length : 0;
-if (Math.abs(ay - by) > 12) return ay - by;
-const ax = Array.isArray(a.poly) ? a.poly.reduce((n, p) => n + (p?.[0] || 0), 0) / a.poly.length : 0;
-const bx = Array.isArray(b.poly) ? b.poly.reduce((n, p) => n + (p?.[0] || 0), 0) / b.poly.length : 0;
-return ax - bx;
-})
-.map(item => item.text.replace(/\s+/g, " ").trim())
-.filter(Boolean);
-const allText = lines.join(" ");
-const rules = [
-["Full Score", /full\s*score|conductor|総譜|指揮者用|スコア/i],
-["Piccolo", /piccolo|ピッコロ/i],
-["Flute", /flute|フルート/i],
-["Oboe", /oboe|オーボエ/i],
-["English Horn", /english\s*horn|cor\s*anglais|イングリッシュホルン/i],
-["Bass Clarinet", /bass\s*clarinet|バスクラリネット/i],
-["Clarinet", /clarinet|クラリネット/i],
-["Bassoon", /bassoon|ファゴット/i],
-["Saxophone", /saxophone|soprano\s*sax|alto\s*sax|tenor\s*sax|baritone\s*sax|サクソフォン|サックス/i],
-["Horn", /french\s*horn|ホルン/i],
-["Trumpet", /trumpet|トランペット/i],
-["Trombone", /trombone|trombone\s*[1-9]|トロンボーン/i],
-["Euphonium", /euphonium|ユーフォニアム/i],
-["Tuba", /tuba|チューバ/i],
-["Violin", /violin|ヴァイオリン|バイオリン/i],
-["Viola", /viola|ヴィオラ/i],
-["Cello", /cello|violoncello|チェロ/i],
-["Contrabass", /contrabass|double\s*bass|コントラバス/i],
-["Percussion", /percussion|打楽器|パーカッション/i],
-["Timpani", /timpani|ティンパニ/i],
-["Piano", /piano|ピアノ/i],
-["Harp", /harp|ハープ/i]
-];
-for (const [category, pattern] of rules) {
-if (pattern.test(allText)) return category;
-}
-return "";
+async function requestNvidiaPart(imageBlob) {
+  const image = await blobToDataUrl(imageBlob);
+  const response = await fetch(NVIDIA_WORKER_URL + "/", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ image })
+  });
+  let data = {};
+  try { data = await response.json(); } catch (_) {}
+  if (!response.ok) {
+    const detail = data.details ? "：" + data.details : "";
+    throw new Error((data.error || "NVIDIA AIへの接続に失敗しました") + detail);
+  }
+  return normalizeAiPartName(data.partName || "");
 }
 async function runAIRecognition() {
-if (isRecognizing) return;
-if (pageList.length === 0) { showToast('認識する楽譜ページがありません', 'error'); return; }
-const button = document.getElementById('btn-auto-detect');
-const originalHTML = button.innerHTML;
-isRecognizing = true;
-button.disabled = true;
-button.classList.add('opacity-60', 'cursor-not-allowed');
-let detectedCount = 0;
-let failedCount = 0;
-const failureDetails = [];
-try {
-button.innerHTML = '<span>OCRモデルを準備中...</span>';
-showToast('無料OCRモデルを準備しています（初回はダウンロードに時間がかかります）', 'info');
-const ocr = await getPaddleOcr();
-for (let i = 0; i < pageList.length; i++) {
-const pageItem = pageList[i];
-try {
-// 1ページずつBlob化し、Base64や中間バッファを作らずOCRへ渡す
-const pageBlob = await extractPageImageBlob(pageItem);
-if (!pageBlob || pageBlob.size === 0) throw new Error('ページ画像を作成できませんでした');
-const [ocrResult] = await ocr.predict(pageBlob, {
-textRecScoreThresh: 0.12,
-textDetLimitSideLen: 1024,
-textDetBoxThresh: 0.4
-});
-let part = identifyPartFromOcr(ocrResult?.items);
-// ページ全体で見つからない場合だけ、文字が小さくなりやすい上部を高解像度で再確認
-if (!part) {
-const headerBlob = await extractPageHeaderBlob(pageItem);
-const [headerResult] = await ocr.predict(headerBlob, {
-textRecScoreThresh: 0.08,
-textDetLimitSideLen: 1600,
-textDetBoxThresh: 0.35
-});
-part = identifyPartFromOcr(headerResult?.items);
+  if (isRecognizing) return;
+  if (pageList.length === 0) { showToast('認識する楽譜ページがありません', 'error'); return; }
+  const button = document.getElementById('btn-auto-detect');
+  const originalHTML = button.innerHTML;
+  isRecognizing = true;
+  button.disabled = true;
+  button.classList.add('opacity-60', 'cursor-not-allowed');
+  let detectedCount = 0;
+  let failedCount = 0;
+  const failureDetails = [];
+  try {
+    for (let i = 0; i < pageList.length; i++) {
+      const pageItem = pageList[i];
+      try {
+        button.innerHTML = `<span>NVIDIA AI認識中 ${i + 1}/${pageList.length}</span>`;
+        showToast(`NVIDIA AIで認識中 ${i + 1}/${pageList.length}ページ`, 'info');
+        const pageBlob = await extractPageImageBlob(pageItem);
+        if (!pageBlob || pageBlob.size === 0) throw new Error('ページ画像を作成できませんでした');
+        let part = await requestNvidiaPart(pageBlob);
+        if (!part) {
+          const headerBlob = await extractPageHeaderBlob(pageItem);
+          part = await requestNvidiaPart(headerBlob);
+        }
+        if (!part) throw new Error('AIが楽器名・パート名を特定できませんでした');
+        let matched = partCategories.find(c => c.toLowerCase() === part.toLowerCase());
+        if (!matched) {
+          partCategories.splice(Math.max(1, partCategories.length - 1), 0, part);
+          matched = part;
+        }
+        pageItem.partName = matched;
+        detectedCount++;
+      } catch (err) {
+        failedCount++;
+        const reason = err && err.message ? String(err.message) : '原因不明のエラー';
+        failureDetails.push({ page: i + 1, reason: reason.slice(0, 120) });
+        console.error(`NVIDIA AI recognition failed on page ${i + 1}:`, err);
+      }
+      if ((i + 1) % 2 === 0 || i === pageList.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+    }
+    renderPartCategories();
+    renderPagesGrid();
+    const firstFailure = failureDetails[0];
+    const failureSummary = firstFailure ? `（例：P${firstFailure.page} ${firstFailure.reason}）` : '';
+    showToast(`NVIDIA AI認識完了：${detectedCount}ページ成功${failedCount ? `、${failedCount}ページ失敗 ${failureSummary}` : ''}`, failedCount ? 'error' : 'success');
+  } catch (err) {
+    console.error('NVIDIA AI recognition failed:', err);
+    showToast('NVIDIA AI認識に失敗しました。Workerの設定とAPI利用枠を確認してください。', 'error');
+  } finally {
+    isRecognizing = false;
+    button.disabled = false;
+    button.classList.remove('opacity-60', 'cursor-not-allowed');
+    button.innerHTML = originalHTML;
+    if (window.lucide) lucide.createIcons();
+  }
 }
-if (!part) throw new Error('ページ全体・上部拡大の両方で楽器名・パート名を特定できませんでした');
-let matched = partCategories.find(c => c.toLowerCase() === part.toLowerCase());
-if (!matched) { partCategories.splice(Math.max(1, partCategories.length - 1), 0, part); matched = part; }
-pageItem.partName = matched;
-detectedCount++;
-} catch (err) {
-failedCount++;
-const reason = err && err.message ? String(err.message) : '原因不明のエラー';
-failureDetails.push({ page: i + 1, reason: reason.slice(0, 120) });
-console.error(`OCR recognition failed on page ${i + 1}:`, err);
-}
-button.innerHTML = `<span>OCR認識中 ${i + 1}/${pageList.length}</span>`;
-if ((i + 1) % 2 === 0 || i === pageList.length - 1) {
-showToast(`OCR認識中 ${i + 1}/${pageList.length}ページ`, 'info');
-// iPhone Safariに描画・一時オブジェクトの解放時間を与える
-await new Promise(resolve => setTimeout(resolve, 80));
-}
-}
-renderPartCategories();
-renderPagesGrid();
-const firstFailure = failureDetails[0];
-const failureSummary = firstFailure ? `（例：P${firstFailure.page} ${firstFailure.reason}）` : '';
-showToast(`OCR認識完了：${detectedCount}ページ成功${failedCount ? `、${failedCount}ページ失敗 ${failureSummary}` : ''}`, failedCount ? 'error' : 'success');
-} catch (err) {
-console.error('OCR initialization failed:', err);
-showToast('OCRの準備に失敗しました。通信環境を確認して再試行してください。', 'error');
-} finally {
-isRecognizing = false;
-button.disabled = false;
-button.classList.remove('opacity-60', 'cursor-not-allowed');
-button.innerHTML = originalHTML;
-if (window.lucide) lucide.createIcons();
-}
-}
-// ページ全体を低メモリ設定でJPEG Blob化（Base64変換をしない）
+// ページ全体を低メモリ設定でJPEG Blob化
 async function extractPageImageBlob(pageItem) {
-let pdfDoc = null;
-let page = null;
-let canvas = null;
-try {
-pdfDoc = await pdfjsLib.getDocument({
-data: new Uint8Array(pageItem.pdfBuffer.slice(0)),
-maxImageSize: 1600000
-}).promise;
-page = await pdfDoc.getPage(pageItem.pageNum);
-const baseViewport = page.getViewport({ scale: 1 });
-const maxSide = 1300;
-const maxPixels = 1600000;
-const sideScale = maxSide / Math.max(baseViewport.width, baseViewport.height);
-const pixelScale = Math.sqrt(maxPixels / (baseViewport.width * baseViewport.height));
-const scale = Math.min(1.5, sideScale, pixelScale);
-const viewport = page.getViewport({ scale: Math.max(0.35, scale) });
-canvas = document.createElement('canvas');
-canvas.width = Math.max(1, Math.ceil(viewport.width));
-canvas.height = Math.max(1, Math.ceil(viewport.height));
-const ctx = canvas.getContext('2d', { alpha: false });
-if (!ctx) throw new Error('Canvasを初期化できません');
-ctx.fillStyle = '#ffffff';
-ctx.fillRect(0, 0, canvas.width, canvas.height);
-await page.render({ canvasContext: ctx, viewport }).promise;
-const blob = await new Promise((resolve, reject) => {
-canvas.toBlob(result => result ? resolve(result) : reject(new Error('画像圧縮に失敗しました')), 'image/jpeg', 0.78);
-});
-return blob;
-} catch (err) {
-console.error('Full page image extraction error:', err);
-throw err;
-} finally {
-if (page) { try { page.cleanup(); } catch (_) {} }
-if (pdfDoc) { try { await pdfDoc.destroy(); } catch (_) {} }
-if (canvas) { canvas.width = 0; canvas.height = 0; canvas = null; }
+  let pdfDoc = null;
+  let page = null;
+  let canvas = null;
+  try {
+    pdfDoc = await pdfjsLib.getDocument({
+      data: new Uint8Array(pageItem.pdfBuffer.slice(0)),
+      maxImageSize: 1600000
+    }).promise;
+    page = await pdfDoc.getPage(pageItem.pageNum);
+    const baseViewport = page.getViewport({ scale: 1 });
+    const maxSide = 1300;
+    const maxPixels = 1600000;
+    const sideScale = maxSide / Math.max(baseViewport.width, baseViewport.height);
+    const pixelScale = Math.sqrt(maxPixels / (baseViewport.width * baseViewport.height));
+    const scale = Math.min(1.5, sideScale, pixelScale);
+    const viewport = page.getViewport({ scale: Math.max(0.35, scale) });
+    canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.ceil(viewport.width));
+    canvas.height = Math.max(1, Math.ceil(viewport.height));
+    const ctx = canvas.getContext('2d', { alpha: false });
+    if (!ctx) throw new Error('Canvasを初期化できません');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    await page.render({ canvasContext: ctx, viewport }).promise;
+    return await new Promise((resolve, reject) => {
+      canvas.toBlob(result => result ? resolve(result) : reject(new Error('画像圧縮に失敗しました')), 'image/jpeg', 0.78);
+    });
+  } catch (err) {
+    console.error('Full page image extraction error:', err);
+    throw err;
+  } finally {
+    if (page) { try { page.cleanup(); } catch (_) {} }
+    if (pdfDoc) { try { await pdfDoc.destroy(); } catch (_) {} }
+    if (canvas) { canvas.width = 0; canvas.height = 0; canvas = null; }
+  }
 }
-}
-// ページ上部を高解像度で再OCR（通常OCRで判定できなかった場合のみ使用）
+// ページ上部を高解像度で切り出し（通常認識で判定できなかった場合のみ使用）
 async function extractPageHeaderBlob(pageItem) {
-let pdfDoc = null;
-let page = null;
-let sourceCanvas = null;
-let headerCanvas = null;
-try {
-pdfDoc = await pdfjsLib.getDocument({
-data: new Uint8Array(pageItem.pdfBuffer.slice(0)),
-maxImageSize: 2600000
-}).promise;
-page = await pdfDoc.getPage(pageItem.pageNum);
-const baseViewport = page.getViewport({ scale: 1 });
-const scale = Math.min(1.8, 1800 / Math.max(baseViewport.width, baseViewport.height));
-const viewport = page.getViewport({ scale });
-sourceCanvas = document.createElement('canvas');
-sourceCanvas.width = Math.ceil(viewport.width);
-sourceCanvas.height = Math.ceil(viewport.height);
-const ctx = sourceCanvas.getContext('2d', { alpha: false });
-if (!ctx) throw new Error('拡大画像を初期化できません');
-ctx.fillStyle = '#ffffff';
-ctx.fillRect(0, 0, sourceCanvas.width, sourceCanvas.height);
-await page.render({ canvasContext: ctx, viewport }).promise;
-headerCanvas = document.createElement('canvas');
-headerCanvas.width = sourceCanvas.width;
-headerCanvas.height = Math.max(1, Math.ceil(sourceCanvas.height * 0.3));
-const headerCtx = headerCanvas.getContext('2d', { alpha: false });
-if (!headerCtx) throw new Error('上部画像を初期化できません');
-headerCtx.fillStyle = '#ffffff';
-headerCtx.fillRect(0, 0, headerCanvas.width, headerCanvas.height);
-headerCtx.drawImage(sourceCanvas, 0, 0, sourceCanvas.width, headerCanvas.height, 0, 0, headerCanvas.width, headerCanvas.height);
-return await new Promise((resolve, reject) => {
-headerCanvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('上部画像の圧縮に失敗しました')), 'image/jpeg', 0.88);
-});
-} finally {
-if (page) { try { page.cleanup(); } catch (_) {} }
-if (pdfDoc) { try { await pdfDoc.destroy(); } catch (_) {} }
-if (sourceCanvas) { sourceCanvas.width = 0; sourceCanvas.height = 0; }
-if (headerCanvas) { headerCanvas.width = 0; headerCanvas.height = 0; }
-}
+  let pdfDoc = null;
+  let page = null;
+  let sourceCanvas = null;
+  let headerCanvas = null;
+  try {
+    pdfDoc = await pdfjsLib.getDocument({
+      data: new Uint8Array(pageItem.pdfBuffer.slice(0)),
+      maxImageSize: 2600000
+    }).promise;
+    page = await pdfDoc.getPage(pageItem.pageNum);
+    const baseViewport = page.getViewport({ scale: 1 });
+    const scale = Math.min(1.8, 1800 / Math.max(baseViewport.width, baseViewport.height));
+    const viewport = page.getViewport({ scale });
+    sourceCanvas = document.createElement('canvas');
+    sourceCanvas.width = Math.ceil(viewport.width);
+    sourceCanvas.height = Math.ceil(viewport.height);
+    const ctx = sourceCanvas.getContext('2d', { alpha: false });
+    if (!ctx) throw new Error('拡大画像を初期化できません');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, sourceCanvas.width, sourceCanvas.height);
+    await page.render({ canvasContext: ctx, viewport }).promise;
+    headerCanvas = document.createElement('canvas');
+    headerCanvas.width = sourceCanvas.width;
+    headerCanvas.height = Math.max(1, Math.ceil(sourceCanvas.height * 0.3));
+    const headerCtx = headerCanvas.getContext('2d', { alpha: false });
+    if (!headerCtx) throw new Error('上部画像を初期化できません');
+    headerCtx.fillStyle = '#ffffff';
+    headerCtx.fillRect(0, 0, headerCanvas.width, headerCanvas.height);
+    headerCtx.drawImage(sourceCanvas, 0, 0, sourceCanvas.width, headerCanvas.height, 0, 0, headerCanvas.width, headerCanvas.height);
+    return await new Promise((resolve, reject) => {
+      headerCanvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('上部画像の圧縮に失敗しました')), 'image/jpeg', 0.88);
+    });
+  } finally {
+    if (page) { try { page.cleanup(); } catch (_) {} }
+    if (pdfDoc) { try { await pdfDoc.destroy(); } catch (_) {} }
+    if (sourceCanvas) { sourceCanvas.width = 0; sourceCanvas.height = 0; }
+    if (headerCanvas) { headerCanvas.width = 0; headerCanvas.height = 0; }
+  }
 }
 // A3 Spread Splitting (pdfsplit.shotaste style)
 async function splitSpreads(onlySelected = false) {
