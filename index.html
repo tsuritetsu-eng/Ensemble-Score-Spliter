@@ -709,7 +709,11 @@ async function requestGeminiPart(pdfBase64, pageNumber) {
   try { data = await response.json(); } catch (_) {}
   if (!response.ok) {
     const detail = data.details ? "：" + data.details : "";
-    throw new Error((data.error || "Gemini AIへの接続に失敗しました") + detail);
+    const fields = Array.isArray(data.receivedFields)
+      ? "（Worker受信キー: " + (data.receivedFields.join(", ") || "なし") + "）"
+      : "";
+    const requestId = data.requestId ? " [requestId: " + data.requestId + "]" : "";
+    throw new Error((data.error || "Gemini AIへの接続に失敗しました") + detail + fields + requestId);
   }
   if (data.recognized === false) {
     const raw = data.debug?.rawText ? " Gemini応答:「" + data.debug.rawText + "」" : "";
