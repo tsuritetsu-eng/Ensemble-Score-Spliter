@@ -121,7 +121,7 @@ transition: transform 0.15s ease;
 <span class="text-[10px] font-bold px-1.5 py-0.5 bg-sky-100 dark:bg-sky-900/40 text-sky-700 dark:text-sky-300 rounded">Gemini AI</span>
 </div>
 <p class="text-xs text-slate-500 dark:text-slate-400 mb-3">
-各楽譜ページをPDF形式のままCloudflare Worker経由でGemini AIに送り、楽器名・パート名を判定します。APIキーはWorker側で保護されます。PDFページは認識のためGoogle Geminiへ送信されます。
+各ページ上部の楽器名・パート名が印刷された範囲を高解像度画像として切り抜き、Cloudflare Worker経由でGemini AIに送信します。APIキーはWorker側で保護されます。切り抜き画像のみGoogle Geminiへ送信されます。
 </p>
 <button id="btn-auto-detect" class="w-full py-2.5 px-4 bg-amber-500 hover:bg-amber-600 text-white font-medium text-sm rounded-lg shadow-sm flex items-center justify-center space-x-2 transition">
 <i data-lucide="scan-line" class="w-4 h-4"></i>
@@ -210,7 +210,7 @@ A3横長などの見開き譜面を真ん中で独立した2枚のページ（A4
 </div>
 <h3 class="text-base font-semibold text-slate-700 dark:text-slate-200 mb-1">ここにPDF楽譜ファイルをドラッグ＆ドロップ</h3>
 <p class="text-xs text-slate-400 max-w-sm mb-4">またはファイル選択ボタンから読み込んでください（複数可）</p>
-<span class="px-3 py-1 bg-slate-100 dark:bg-slate-700 text-slate-500 text-[11px] rounded-full">Gemini AIによるPDFページ認識（PDFを外部送信します）</span>
+<span class="px-3 py-1 bg-slate-100 dark:bg-slate-700 text-slate-500 text-[11px] rounded-full">Gemini AIによるページ上部の画像認識（切り抜き画像を外部送信します）</span>
 </div>
 <!-- Pages Grid Container -->
 <div id="pages-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 relative z-10">
@@ -699,11 +699,24 @@ async function createSinglePagePdfBase64(pageItem) {
   }
   return btoa(binary);
 }
-async function requestGeminiPart(pdfBase64, pageNumber) {
+async function blobToBase64(blob) {
+  return await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result || '');
+      const comma = result.indexOf(',');
+      if (comma < 0) return reject(new Error('画像をBase64に変換できません'));
+      resolve(result.slice(comma + 1));
+    };
+    reader.onerror = () => reject(new Error('画像の読み込みに失敗しました'));
+    reader.readAsDataURL(blob);
+  });
+}
+async function requestGeminiPart(imageBase64, pageNumber) {
   const response = await fetch(GEMINI_WORKER_URL + "/", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ pdf: pdfBase64, pageNumber })
+    body: JSON.stringify({ image: imageBase64, mimeType: "image/jpeg", pageNumber })
   });
   let data = {};
   try { data = await response.json(); } catch (_) {}
@@ -742,9 +755,11 @@ async function runAIRecognition() {
       const pageItem = pageList[i];
       try {
         button.innerHTML = `<span>Gemini AI認識中 ${i + 1}/${pageList.length}</span>`;
-        showToast(`Gemini AIでPDFを解析中 ${i + 1}/${pageList.length}ページ`, 'info');
-        const pdfBase64 = await createSinglePagePdfBase64(pageItem);
-        const part = await requestGeminiPart(pdfBase64, pageItem.pageNum);
+        showToast(`ページ上部を切り抜いて認識中 ${i + 1}/${pageList.length}ページ`, 'info');
+        const headerBlob = await extractPageHeaderBlob(pageItem);
+        const imageBase64 = await blobToBase64(headerBlob);
+        if (!imageBase64) throw new Error('ヘッダー画像を取得できませんでした');
+        const part = await requestGeminiPart(imageBase64, pageItem.pageNum);
         if (!part) throw new Error('AIが楽器名・パート名を特定できませんでした');
         let matched = partCategories.find(c => c.toLowerCase() === part.toLowerCase());
         if (!matched) {
@@ -757,7 +772,7 @@ async function runAIRecognition() {
         failedCount++;
         const reason = err && err.message ? String(err.message) : '原因不明のエラー';
         failureDetails.push({ page: i + 1, reason: reason.slice(0, 160) });
-        console.error(`Gemini PDF recognition failed on page ${i + 1}:`, err);
+        console.error(`Gemini header-image recognition failed on page ${i + 1}:`, err);
       }
       if ((i + 1) % 2 === 0 || i === pageList.length - 1) {
         await new Promise(resolve => setTimeout(resolve, 100));
