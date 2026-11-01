@@ -118,10 +118,10 @@ transition: transform 0.15s ease;
 <i data-lucide="sparkles" class="w-4 h-4 text-amber-500"></i>
 <span>AI パート自動認識</span>
 </h2>
-<span class="text-[10px] font-bold px-1.5 py-0.5 bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400 rounded">AI Worker</span>
+<span class="text-[10px] font-bold px-1.5 py-0.5 bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400 rounded">無料・端末内OCR</span>
 </div>
 <p class="text-xs text-slate-500 dark:text-slate-400 mb-3">
-各楽譜ページの左上・ヘッダー表記をCloudflare AI Workerで解析し、パート別に自動カテゴリ分けします。
+各楽譜ページ上部の文字をOCRで読み取ります。画像は外部サーバーへ送信せず、このブラウザ内で処理します（初回のみOCRモデルをダウンロード）。
 </p>
 <button id="btn-auto-detect" class="w-full py-2.5 px-4 bg-amber-500 hover:bg-amber-600 text-white font-medium text-sm rounded-lg shadow-sm flex items-center justify-center space-x-2 transition">
 <i data-lucide="scan-line" class="w-4 h-4"></i>
@@ -260,8 +260,9 @@ A3横長などの見開き譜面を真ん中で独立した2枚のページ（A4
 <script>
 // PDF.js Worker Init
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-// Cloudflare Worker URL (Integrated with your active endpoint)
-const CLOUDFLARE_WORKER_URL = 'https://sheet-music-parser.mrtsuritetsu.workers.dev/';
+// PaddleOCR.js: free, in-browser OCR (no API key or server required)
+const PADDLE_OCR_CDN = "https://cdn.jsdelivr.net/npm/@paddleocr/paddleocr-js@0.4.2/+esm";
+let paddleOcrPromise = null;
 // State Management
 let pageList = []; // { id, originalPdfIndex, pageNum, pdfBuffer, rotation, cropBox, partName, selected, width, height }
 let partCategories = ['すべて', 'Full Score', 'Flute', 'Oboe', 'Clarinet', 'Bassoon', 'Saxophone', 'Horn', 'Trumpet', 'Trombone', 'Tuba', 'Violin', 'Viola', 'Cello', 'Contrabass', 'Percussion', '未分類'];
@@ -630,6 +631,66 @@ renderPagesGrid();
 renderPartCategories();
 }
 // Cloudflare AI Worker Header Part Recognition Engine
+async function getPaddleOcr() {
+if (!paddleOcrPromise) {
+paddleOcrPromise = (async () => {
+const { PaddleOCR } = await import(PADDLE_OCR_CDN);
+return await PaddleOCR.create({
+lang: "japan",
+ocrVersion: "PP-OCRv6",
+ortOptions: { backend: "auto" }
+});
+})();
+}
+try { return await paddleOcrPromise; }
+catch (error) { paddleOcrPromise = null; throw error; }
+}
+function identifyPartFromOcr(items) {
+const lines = (Array.isArray(items) ? items : [])
+.filter(item => item && typeof item.text === "string" && Number(item.score ?? 0) >= 0.25)
+.sort((a, b) => {
+const ay = Array.isArray(a.poly) ? a.poly.reduce((n, p) => n + (p?.[1] || 0), 0) / a.poly.length : 0;
+const by = Array.isArray(b.poly) ? b.poly.reduce((n, p) => n + (p?.[1] || 0), 0) / b.poly.length : 0;
+if (Math.abs(ay - by) > 12) return ay - by;
+const ax = Array.isArray(a.poly) ? a.poly.reduce((n, p) => n + (p?.[0] || 0), 0) / a.poly.length : 0;
+const bx = Array.isArray(b.poly) ? b.poly.reduce((n, p) => n + (p?.[0] || 0), 0) / b.poly.length : 0;
+return ax - bx;
+})
+.map(item => item.text.replace(/\\s+/g, " ").trim())
+.filter(Boolean);
+const allText = lines.join(" ");
+const rules = [
+["Full Score", /full\\s*score|conductor|総譜|指揮者用|スコア/i],
+["Piccolo", /piccolo|ピッコロ/i],
+["Flute", /flute|フルート/i],
+["Oboe", /oboe|オーボエ/i],
+["English Horn", /english\\s*horn|cor\\s*anglais|イングリッシュホルン/i],
+["Clarinet", /clarinet|クラリネット/i],
+["Bass Clarinet", /bass\\s*clarinet|バスクラリネット/i],
+["Bassoon", /bassoon|ファゴット/i],
+["Saxophone", /saxophone|サクソフォン|サックス/i],
+["Horn", /french\\s*horn|ホルン/i],
+["Trumpet", /trumpet|トランペット/i],
+["Trombone", /trombone|トロンボーン/i],
+["Euphonium", /euphonium|ユーフォニアム/i],
+["Tuba", /tuba|チューバ/i],
+["Violin", /violin|ヴァイオリン|バイオリン/i],
+["Viola", /viola|ヴィオラ/i],
+["Cello", /cello|violoncello|チェロ/i],
+["Contrabass", /contrabass|double\\s*bass|コントラバス/i],
+["Percussion", /percussion|打楽器|パーカッション/i],
+["Timpani", /timpani|ティンパニ/i],
+["Piano", /piano|ピアノ/i],
+["Harp", /harp|ハープ/i]
+];
+for (const [category, pattern] of rules) {
+if (!pattern.test(allText)) continue;
+const line = lines.find(text => pattern.test(text));
+if (line && line.length <= 80) return line;
+return category;
+}
+return "";
+}
 async function runAIRecognition() {
 if (isRecognizing) return;
 if (pageList.length === 0) { showToast('認識する楽譜ページがありません', 'error'); return; }
@@ -642,48 +703,42 @@ let detectedCount = 0;
 let failedCount = 0;
 const failureDetails = [];
 try {
+button.innerHTML = '<span>OCRモデルを準備中...</span>';
+showToast('無料OCRモデルを準備しています（初回はダウンロードに時間がかかります）', 'info');
+const ocr = await getPaddleOcr();
 for (let i = 0; i < pageList.length; i++) {
 const pageItem = pageList[i];
 try {
 const headerBase64 = await extractHeaderImageBase64(pageItem);
 if (!headerBase64) throw new Error('ヘッダー画像を作成できませんでした');
-const controller = new AbortController();
-const timeoutId = setTimeout(() => controller.abort(), 65000);
-let response;
-try {
-response = await fetch(CLOUDFLARE_WORKER_URL, {
-method: 'POST', headers: { 'Content-Type': 'application/json' },
-body: JSON.stringify({ image: headerBase64 }), signal: controller.signal
-});
-} finally { clearTimeout(timeoutId); }
-const payload = await response.json().catch(() => ({}));
-if (!response.ok) { const upstream = payload.upstreamStatus ? ` / NVIDIA HTTP ${payload.upstreamStatus}` : ''; const detail = payload.details ? ` / 詳細: ${String(payload.details).slice(0, 240)}` : ''; throw new Error(`${payload.error || 'Worker error'} (HTTP ${response.status}${upstream}${detail})`); }
-const part = String(payload.partName || '').replace(/[\u0000-\u001f]/g, '').trim().replace(/^['\"]|['\"]$/g, '').slice(0, 80);
-if (!part) throw new Error('パート名を読み取れませんでした');
+const headerBlob = await (await fetch('data:image/jpeg;base64,' + headerBase64)).blob();
+const [ocrResult] = await ocr.predict(headerBlob, { textRecScoreThresh: 0.25 });
+const part = identifyPartFromOcr(ocrResult?.items);
+if (!part) throw new Error('ヘッダーから楽器名・パート名を特定できませんでした');
 let matched = partCategories.find(c => c.toLowerCase() === part.toLowerCase());
 if (!matched) { partCategories.splice(Math.max(1, partCategories.length - 1), 0, part); matched = part; }
 pageItem.partName = matched;
 detectedCount++;
 } catch (err) {
 failedCount++;
-let reason = err && err.name === 'AbortError'
-? '応答タイムアウト（65秒）'
-: (err && err.message ? String(err.message) : '原因不明のエラー');
-if (/Failed to fetch|NetworkError|Load failed/i.test(reason)) {
-reason = 'Workerに接続できません（公開状態・URL・CORSを確認）';
-}
+const reason = err && err.message ? String(err.message) : '原因不明のエラー';
 failureDetails.push({ page: i + 1, reason: reason.slice(0, 120) });
-console.error(`AI recognition failed on page ${i + 1}:`, err);
+console.error(`OCR recognition failed on page ${i + 1}:`, err);
 }
-if ((i + 1) % 5 === 0 || i === pageList.length - 1) showToast(`AI認識中 ${i + 1}/${pageList.length}ページ`, 'info');
+button.innerHTML = `<span>OCR認識中 ${i + 1}/${pageList.length}</span>`;
+if ((i + 1) % 2 === 0 || i === pageList.length - 1) {
+showToast(`OCR認識中 ${i + 1}/${pageList.length}ページ`, 'info');
+await new Promise(resolve => setTimeout(resolve, 0));
+}
 }
 renderPartCategories();
 renderPagesGrid();
 const firstFailure = failureDetails[0];
-const failureSummary = firstFailure
-? `（例：P${firstFailure.page} ${firstFailure.reason}）`
-: '';
-showToast(`AI認識完了：${detectedCount}ページ成功${failedCount ? `、${failedCount}ページ失敗 ${failureSummary}` : ''}`, failedCount ? 'error' : 'success');
+const failureSummary = firstFailure ? `（例：P${firstFailure.page} ${firstFailure.reason}）` : '';
+showToast(`OCR認識完了：${detectedCount}ページ成功${failedCount ? `、${failedCount}ページ失敗 ${failureSummary}` : ''}`, failedCount ? 'error' : 'success');
+} catch (err) {
+console.error('OCR initialization failed:', err);
+showToast('OCRの準備に失敗しました。通信環境を確認して再試行してください。', 'error');
 } finally {
 isRecognizing = false;
 button.disabled = false;
