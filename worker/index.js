@@ -1,5 +1,5 @@
-const NVIDIA_ENDPOINT = "https://integrate.api.nvidia.com/v1/chat/completions";
-const NVIDIA_MODEL = "meta/llama-3.2-11b-vision-instruct";
+const GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent";
+const GEMINI_MODEL = "gemini-2.5-flash-lite";
 
 const ALLOWED_ORIGINS = new Set([
   "https://tsuritetsu-eng.github.io",
@@ -11,7 +11,7 @@ const ALLOWED_ORIGINS = new Set([
 
 const MAX_JSON_BYTES = 7 * 1024 * 1024;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
-const NVIDIA_TIMEOUT_MS = 55000;
+const GEMINI_TIMEOUT_MS = 55000;
 
 function corsHeaders(origin) {
   const headers = {
@@ -91,7 +91,7 @@ function parseImage(value) {
     throw new Error("IMAGE_TOO_LARGE");
   }
 
-  return { mime, dataUri: `data:${mime};base64,${base64}` };
+  return { mime, base64, dataUri: `data:${mime};base64,${base64}` };
 }
 
 function cleanPartName(value) {
@@ -124,7 +124,7 @@ export default {
       return jsonResponse({
         ok: true,
         service: "sheet-music-parser",
-        model: NVIDIA_MODEL
+        model: GEMINI_MODEL
       }, 200, origin);
     }
 
@@ -141,8 +141,8 @@ export default {
       return jsonResponse({ error: "Request body is too large", requestId }, 413, origin);
     }
 
-    if (!env.NVIDIA_API_KEY) {
-      return jsonResponse({ error: "Worker secret NVIDIA_API_KEY is not configured", requestId }, 500, origin);
+    if (!env.GEMINI_API_KEY) {
+      return jsonResponse({ error: "Worker secret GEMINI_API_KEY is not configured", requestId }, 500, origin);
     }
 
     let payload;
@@ -181,37 +181,37 @@ export default {
     ].join(" ");
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), NVIDIA_TIMEOUT_MS);
+    const timeoutId = setTimeout(() => controller.abort(), GEMINI_TIMEOUT_MS);
 
     let upstream;
     try {
-      upstream = await fetch(NVIDIA_ENDPOINT, {
+      upstream = await fetch(GEMINI_ENDPOINT, {
         method: "POST",
         headers: {
-          "Authorization": `Bearer ${env.NVIDIA_API_KEY}`,
+          "x-goog-api-key": env.GEMINI_API_KEY,
           "Content-Type": "application/json",
           "Accept": "application/json"
         },
         body: JSON.stringify({
-          model: NVIDIA_MODEL,
-          messages: [{
+          contents: [{
             role: "user",
-            content: [
-              { type: "text", text: prompt },
-              { type: "image_url", image_url: { url: image.dataUri } }
+            parts: [
+              { text: prompt },
+              { inline_data: { mime_type: image.mime, data: image.base64 } }
             ]
           }],
-          temperature: 0.1,
-          top_p: 0.7,
-          max_tokens: 48,
-          stream: false
+          generationConfig: {
+            temperature: 0.1,
+            maxOutputTokens: 48,
+            responseMimeType: "text/plain"
+          }
         }),
         signal: controller.signal
       });
     } catch (error) {
       const timedOut = error?.name === "AbortError";
       return jsonResponse({
-        error: timedOut ? "NVIDIA request timed out" : "Could not connect to NVIDIA API",
+        error: timedOut ? "Gemini request timed out" : "Could not connect to Gemini API",
         requestId
       }, timedOut ? 504 : 502, origin);
     } finally {
@@ -244,7 +244,7 @@ export default {
         providerMessage = "";
       }
       return jsonResponse({
-        error: "NVIDIA API returned an error",
+        error: "Gemini API returned an error",
         upstreamStatus: upstream.status,
         details: providerMessage || "NVIDIAから詳細情報のないエラー応答が返されました",
         requestId
@@ -255,13 +255,13 @@ export default {
     try {
       result = await upstream.json();
     } catch {
-      return jsonResponse({ error: "NVIDIA returned an invalid response", requestId }, 502, origin);
+      return jsonResponse({ error: "Gemini returned an invalid response", requestId }, 502, origin);
     }
 
-    const content = result?.choices?.[0]?.message?.content;
+    const content = result?.candidates?.[0]?.content?.parts;
     const rawText = Array.isArray(content)
       ? content.map(part => typeof part?.text === "string" ? part.text : "").join(" ")
-      : content;
+      : "";
     const partName = cleanPartName(rawText);
 
     if (!partName || partName.toUpperCase() === "UNKNOWN") {
@@ -269,7 +269,7 @@ export default {
         partName: "",
         recognized: false,
         message: "Header text could not be identified",
-        model: NVIDIA_MODEL,
+        model: GEMINI_MODEL,
         requestId
       }, 200, origin);
     }
@@ -277,7 +277,7 @@ export default {
     return jsonResponse({
       partName,
       recognized: true,
-      model: NVIDIA_MODEL,
+      model: GEMINI_MODEL,
       requestId
     }, 200, origin);
   }
