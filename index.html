@@ -778,9 +778,21 @@ async function runAIRecognition() {
         button.innerHTML = `<span>Gemini AI認識中 ${i + 1}/${pageList.length}</span>`;
         showToast(`ページ上部を切り抜いて認識中 ${i + 1}/${pageList.length}ページ`, 'info');
         const headerBlob = await extractPageHeaderBlob(pageItem);
-        const imageBase64 = await blobToBase64(headerBlob);
-        if (!imageBase64) throw new Error('ヘッダー画像を取得できませんでした');
-        const part = await requestGeminiPart(imageBase64, pageItem.pageNum);
+        const headerBase64 = await blobToBase64(headerBlob);
+        if (!headerBase64) throw new Error('ヘッダー画像を取得できませんでした');
+        let part = '';
+        try {
+          part = await requestGeminiPart(headerBase64, pageItem.pageNum);
+        } catch (headerError) {
+          const reason = String(headerError?.message || headerError);
+          if (!reason.includes('Geminiは楽器名を返しませんでした')) throw headerError;
+          console.info(`Page ${pageItem.pageNum}: header crop was UNKNOWN; retrying with full page image.`);
+          button.innerHTML = `<span>ページ全体で再認識中 ${i + 1}/${pageList.length}</span>`;
+          const fullPageBlob = await extractPageImageBlob(pageItem);
+          const fullPageBase64 = await blobToBase64(fullPageBlob);
+          if (!fullPageBase64) throw new Error('ページ全体の画像を取得できませんでした');
+          part = await requestGeminiPart(fullPageBase64, pageItem.pageNum);
+        }
         if (!part) throw new Error('AIが楽器名・パート名を特定できませんでした');
         let matched = partCategories.find(c => c.toLowerCase() === part.toLowerCase());
         if (!matched) throw new Error("登録済みの楽器名に一致しません: " + part);
