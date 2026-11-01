@@ -123,8 +123,33 @@ transition: transform 0.15s ease;
 <span class="text-[10px] font-bold px-1.5 py-0.5 bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 rounded">端末内OCR</span>
 </div>
 <p class="text-xs text-slate-500 dark:text-slate-400 mb-3">
-各ページOCRで読み取った楽器名を登録済みの楽器名・略称と照合し、文字の欠けや誤認識も近似判定します。候補が曖昧な場合は誤分類を避けて未分類にします。画像やPDFは外部サーバーへ送信しません。
+楽器名・略称をOCRで読み取り、編成を指定した場合は選択した楽器だけを候補にして分類します。画像やPDFは外部サーバーへ送信しません。
 </p>
+<div class="mb-3 space-y-2">
+<label class="block text-xs font-semibold text-slate-700 dark:text-slate-200" for="ensemble-preset">編成プリセット</label>
+<select id="ensemble-preset" class="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 px-3 py-2 text-sm">
+<option value="">手動選択 / プリセットなし</option>
+<option value="wind">吹奏楽（標準的な候補）</option>
+<option value="woodwind5">木管五重奏</option>
+<option value="brass5">金管五重奏</option>
+<option value="sax4">サクソフォン四重奏</option>
+<option value="brass">金管アンサンブル</option>
+<option value="percussion">打楽器アンサンブル</option>
+<option value="orchestra">オーケストラ（登録済み楽器）</option>
+</select>
+<label class="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-200">
+<input id="ensemble-filter-enabled" type="checkbox" class="rounded" />
+編成で認識候補を絞り込む
+</label>
+<div class="flex items-center justify-between">
+<span id="ensemble-selection-count" class="text-xs text-slate-500 dark:text-slate-400">全楽器から認識</span>
+<div class="flex gap-2">
+<button id="ensemble-select-all" type="button" class="text-xs text-brand-600 dark:text-brand-400">全選択</button>
+<button id="ensemble-clear" type="button" class="text-xs text-brand-600 dark:text-brand-400">全解除</button>
+</div>
+</div>
+<div id="ensemble-instrument-list" class="max-h-52 overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-700 p-2 space-y-2"></div>
+</div>
 <button id="btn-auto-detect" class="w-full py-2.5 px-4 bg-amber-500 hover:bg-amber-600 text-white font-medium text-sm rounded-lg shadow-sm flex items-center justify-center space-x-2 transition">
 <i data-lucide="scan-line" class="w-4 h-4"></i>
 <span>OCRでパート名を認識</span>
@@ -340,6 +365,7 @@ document.getElementById('btn-rotate-selected').addEventListener('click', rotateS
 document.getElementById('btn-delete-selected').addEventListener('click', deleteSelectedPages);
 // AI Recognition
 document.getElementById('btn-auto-detect').addEventListener('click', runAIRecognition);
+setupEnsembleSelector();
 // Spread Splitting
 document.getElementById('btn-split-selected-spread').addEventListener('click', () => splitSpreads(true));
 document.getElementById('btn-split-all-spreads').addEventListener('click', () => splitSpreads(false));
@@ -630,13 +656,121 @@ pageList = pageList.filter(p => !p.selected);
 renderPagesGrid();
 renderPartCategories();
 }
+// 編成プリセットと候補絞り込み
+const ensembleInstrumentGroups = {
+  "木管楽器": ["Flute","Piccolo","Oboe","English Horn","Bassoon","E♭ Clarinet","B♭ Clarinet","Alto Clarinet","Bass Clarinet","Contrabass Clarinet","Soprano Saxophone","Alto Saxophone","Tenor Saxophone","Baritone Saxophone"],
+  "金管楽器": ["Trumpet","Cornet","Flugelhorn","French Horn","Trombone","Bass Trombone","Euphonium","Tuba"],
+  "弦・その他": ["Double Bass","Harp","Electric Bass"],
+  "打楽器": ["Glockenspiel","Xylophone","Marimba","Vibraphone","Tubular Bells","Timpani","Snare Drum","Bass Drum","Crash Cymbals","Suspended Cymbal","Tambourine","Tam-tam","Wood Block","Castanets","Shaker","Drum Set"]
+};
+const ensemblePresets = {
+  wind: ["Flute","Piccolo","Oboe","Bassoon","E♭ Clarinet","B♭ Clarinet","Bass Clarinet","Alto Saxophone","Tenor Saxophone","Baritone Saxophone","Trumpet","French Horn","Trombone","Euphonium","Tuba","Double Bass","Timpani","Snare Drum","Bass Drum","Crash Cymbals"],
+  woodwind5: ["Flute","Oboe","English Horn","Clarinet","Bassoon"].filter(x => x !== "Clarinet").concat(["B♭ Clarinet"]),
+  brass5: ["Trumpet","French Horn","Trombone","Euphonium","Tuba"],
+  sax4: ["Soprano Saxophone","Alto Saxophone","Tenor Saxophone","Baritone Saxophone"],
+  brass: ["Trumpet","Cornet","Flugelhorn","French Horn","Trombone","Bass Trombone","Euphonium","Tuba"],
+  percussion: ["Glockenspiel","Xylophone","Marimba","Vibraphone","Tubular Bells","Timpani","Snare Drum","Bass Drum","Crash Cymbals","Suspended Cymbal","Tambourine","Tam-tam","Wood Block","Castanets","Shaker","Drum Set"],
+  orchestra: ["Flute","Piccolo","Oboe","English Horn","Bassoon","B♭ Clarinet","Bass Clarinet","Soprano Saxophone","Alto Saxophone","Tenor Saxophone","Trumpet","French Horn","Trombone","Bass Trombone","Tuba","Double Bass","Harp","Timpani","Glockenspiel","Xylophone","Marimba","Vibraphone","Tubular Bells","Snare Drum","Bass Drum","Crash Cymbals","Suspended Cymbal","Tambourine","Tam-tam"]
+};
+let selectedEnsembleInstruments = [];
+function setupEnsembleSelector() {
+  const list = document.getElementById("ensemble-instrument-list");
+  const preset = document.getElementById("ensemble-preset");
+  const enabled = document.getElementById("ensemble-filter-enabled");
+  if (!list || !preset || !enabled) return;
+  try {
+    const saved = JSON.parse(localStorage.getItem("scoreSplitterEnsembleSettings") || "{}");
+    if (Array.isArray(saved.selected)) selectedEnsembleInstruments = saved.selected.filter(x => Object.values(ensembleInstrumentGroups).flat().includes(x));
+    enabled.checked = saved.enabled === true;
+  } catch (_) {}
+  renderEnsembleInstrumentList();
+  updateEnsembleSelectionLabel();
+  preset.addEventListener("change", () => {
+    const key = preset.value;
+    if (key && ensemblePresets[key]) {
+      selectedEnsembleInstruments = [...ensemblePresets[key]];
+      enabled.checked = true;
+      renderEnsembleInstrumentList();
+      saveEnsembleSettings();
+      updateEnsembleSelectionLabel();
+    }
+  });
+  enabled.addEventListener("change", () => { saveEnsembleSettings(); updateEnsembleSelectionLabel(); });
+  document.getElementById("ensemble-select-all").addEventListener("click", () => {
+    selectedEnsembleInstruments = Object.values(ensembleInstrumentGroups).flat();
+    renderEnsembleInstrumentList(); saveEnsembleSettings(); updateEnsembleSelectionLabel();
+  });
+  document.getElementById("ensemble-clear").addEventListener("click", () => {
+    selectedEnsembleInstruments = [];
+    renderEnsembleInstrumentList(); saveEnsembleSettings(); updateEnsembleSelectionLabel();
+  });
+}
+function renderEnsembleInstrumentList() {
+  const list = document.getElementById("ensemble-instrument-list");
+  if (!list) return;
+  list.innerHTML = "";
+  Object.entries(ensembleInstrumentGroups).forEach(([group, items]) => {
+    const section = document.createElement("div");
+    section.className = "mb-2";
+    const heading = document.createElement("div");
+    heading.className = "text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1";
+    heading.textContent = group;
+    section.appendChild(heading);
+    const grid = document.createElement("div");
+    grid.className = "grid grid-cols-2 gap-x-2 gap-y-1";
+    items.forEach(name => {
+      const label = document.createElement("label");
+      label.className = "flex items-center gap-1.5 text-xs text-slate-700 dark:text-slate-200";
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.checked = selectedEnsembleInstruments.includes(name);
+      input.className = "rounded";
+      input.addEventListener("change", () => {
+        selectedEnsembleInstruments = input.checked
+          ? [...selectedEnsembleInstruments, name]
+          : selectedEnsembleInstruments.filter(x => x !== name);
+        document.getElementById("ensemble-preset").value = "";
+        saveEnsembleSettings(); updateEnsembleSelectionLabel();
+      });
+      label.append(input, document.createTextNode(name));
+      grid.appendChild(label);
+    });
+    section.appendChild(grid);
+    list.appendChild(section);
+  });
+}
+function saveEnsembleSettings() {
+  try {
+    localStorage.setItem("scoreSplitterEnsembleSettings", JSON.stringify({
+      enabled: document.getElementById("ensemble-filter-enabled").checked,
+      selected: selectedEnsembleInstruments
+    }));
+  } catch (_) {}
+}
+function updateEnsembleSelectionLabel() {
+  const enabled = document.getElementById("ensemble-filter-enabled").checked;
+  const count = document.getElementById("ensemble-selection-count");
+  if (!count) return;
+  count.textContent = enabled
+    ? (selectedEnsembleInstruments.length ? selectedEnsembleInstruments.length + "種類の楽器だけを候補にします" : "楽器が未選択です（全楽器認識に切り替えてください）")
+    : "全楽器から認識";
+}
+function getEnabledEnsembleCategories() {
+  const enabled = document.getElementById("ensemble-filter-enabled");
+  if (!enabled || !enabled.checked) return null;
+  if (!selectedEnsembleInstruments.length) {
+    throw new Error("編成で絞り込む場合は、楽器を1種類以上選択してください");
+  }
+  return selectedEnsembleInstruments;
+}
+
 // Browser-side OCR helpers
 function cleanOcrText(value) {
   return String(value || '').replace(/[|]/g, 'I').replace(/[：:]/g, ' ').replace(/[()（）\[\]{}]/g, ' ').replace(/\s+/g, ' ').trim();
 }
-async function recognizePartWithOcr(worker, pageItem) {
+async function recognizePartWithOcr(worker, pageItem, allowedCategories = null) {
   const embeddedText = await extractPageTextLabel(pageItem);
-  const embeddedPart = normalizeAiPartName(embeddedText);
+  const embeddedPart = normalizeAiPartName(embeddedText, allowedCategories);
   if (embeddedPart) return { part: embeddedPart, text: embeddedText, confidence: 100, region: 'PDF text' };
 
   const blobs = await extractPageLabelBlobs(pageItem);
@@ -646,7 +780,7 @@ async function recognizePartWithOcr(worker, pageItem) {
     const result = await worker.recognize(blobs[i]);
     const text = cleanOcrText(result && result.data ? result.data.text : '');
     readings.push(text);
-    const part = normalizeAiPartName(text);
+    const part = normalizeAiPartName(text, allowedCategories);
     if (part) return { part, text, confidence: result.data.confidence || 0, region: i + 1 };
   }
   const combined = readings.filter(Boolean).join(' / ');
@@ -669,8 +803,9 @@ async function extractPageTextLabel(pageItem) {
   }
 }
 
-function normalizeAiPartName(value) {
+function normalizeAiPartName(value, allowedCategories = null) {
   if (typeof value !== "string") return "";
+  const isAllowed = category => category === "Full Score" || !allowedCategories || allowedCategories.includes(category);
   // 楽器名末尾のパート番号・声部番号を除去（例: Oboe-3 / Oboe 3 / Oboe III）。
   const text = value.replace(/\s+/g, " ").trim()
     .replace(/(?:[\s._-]+(?:part[\s._-]*)?)?(?:\d+|II|III|IV|V|VI|VII|VIII|IX|X)\s*$/i, "")
@@ -720,7 +855,7 @@ function normalizeAiPartName(value) {
     ["Electric Bass", /electric\s*bass|e\.?\s*bass|エレキベース/i]
   ];
   for (const [category, pattern] of rules) {
-    if (pattern.test(text)) return category;
+    if (isAllowed(category) && pattern.test(text)) return category;
   }
 
   // OCRの読み間違い・文字欠けを、登録済み楽器名と略称に対して曖昧一致させる。
@@ -799,7 +934,7 @@ function normalizeAiPartName(value) {
   }
   // "Bass" が残っている場合、Trombone部分の誤読でも Bass Trombone を優先する。
   const hasBass = /\bbass\b|\bbassoon\b/i.test(text);
-  const scores = aliases.map(([category, names]) => {
+  const scores = aliases.filter(([category]) => isAllowed(category)).map(([category, names]) => {
     let score = 0;
     for (const alias of names) {
       const target = compact(alias);
@@ -884,7 +1019,8 @@ async function runAIRecognition() {
       try {
         button.innerHTML = '<span>OCR認識中 ' + (i + 1) + '/' + pageList.length + '</span>';
         showToast('ページ内6箇所の楽器名候補をOCRで読み取っています ' + (i + 1) + '/' + pageList.length, 'info');
-        const result = await recognizePartWithOcr(worker, pageItem);
+        const allowedCategories = getEnabledEnsembleCategories();
+        const result = await recognizePartWithOcr(worker, pageItem, allowedCategories);
         const matched = partCategories.find(c => c.toLowerCase() === result.part.toLowerCase());
         if (!matched) throw new Error('登録済みの楽器名に一致しません: ' + result.part);
         pageItem.partName = matched;
