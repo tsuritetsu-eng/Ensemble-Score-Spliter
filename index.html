@@ -118,14 +118,14 @@ transition: transform 0.15s ease;
 <i data-lucide="sparkles" class="w-4 h-4 text-amber-500"></i>
 <span>AI パート自動認識</span>
 </h2>
-<span class="text-[10px] font-bold px-1.5 py-0.5 bg-sky-100 dark:bg-sky-900/40 text-sky-700 dark:text-sky-300 rounded">NVIDIA AI・試験利用</span>
+<span class="text-[10px] font-bold px-1.5 py-0.5 bg-sky-100 dark:bg-sky-900/40 text-sky-700 dark:text-sky-300 rounded">Gemini AI</span>
 </div>
 <p class="text-xs text-slate-500 dark:text-slate-400 mb-3">
-各楽譜ページの画像をCloudflare Worker経由でNVIDIAの画像対応AIに送り、楽器名・パート名を判定します。APIキーはWorker側で保護されます。画像はAI認識のためNVIDIAへ送信されます。無料枠での試験利用を想定しています。
+各楽譜ページ全体の画像をCloudflare Worker経由でGemini AIに送り、楽器名・パート名を判定します。APIキーはWorker側で保護されます。画像はAI認識のためGoogle Geminiへ送信されます。
 </p>
 <button id="btn-auto-detect" class="w-full py-2.5 px-4 bg-amber-500 hover:bg-amber-600 text-white font-medium text-sm rounded-lg shadow-sm flex items-center justify-center space-x-2 transition">
 <i data-lucide="scan-line" class="w-4 h-4"></i>
-<span>NVIDIA AIでパート名を認識</span>
+<span>Gemini AIでパート名を認識</span>
 </button>
 </div>
 <!-- A3 Spread Split (pdfsplit style) -->
@@ -210,7 +210,7 @@ A3横長などの見開き譜面を真ん中で独立した2枚のページ（A4
 </div>
 <h3 class="text-base font-semibold text-slate-700 dark:text-slate-200 mb-1">ここにPDF楽譜ファイルをドラッグ＆ドロップ</h3>
 <p class="text-xs text-slate-400 max-w-sm mb-4">またはファイル選択ボタンから読み込んでください（複数可）</p>
-<span class="px-3 py-1 bg-slate-100 dark:bg-slate-700 text-slate-500 text-[11px] rounded-full">NVIDIA AIによる試験認識（画像を外部送信します）</span>
+<span class="px-3 py-1 bg-slate-100 dark:bg-slate-700 text-slate-500 text-[11px] rounded-full">Gemini AIによるページ全体認識（画像を外部送信します）</span>
 </div>
 <!-- Pages Grid Container -->
 <div id="pages-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 relative z-10">
@@ -260,8 +260,8 @@ A3横長などの見開き譜面を真ん中で独立した2枚のページ（A4
 <script>
 // PDF.js Worker Init
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-// NVIDIA Vision AI: Cloudflare Worker proxy
-const NVIDIA_WORKER_URL = "https://sheet-music-parser.mrtsuritetsu.workers.dev";
+// Gemini Vision AI: Cloudflare Worker proxy
+const GEMINI_WORKER_URL = "https://sheet-music-parser.mrtsuritetsu.workers.dev";
 // State Management
 let pageList = []; // { id, originalPdfIndex, pageNum, pdfBuffer, rotation, cropBox, partName, selected, width, height }
 let partCategories = ['すべて', 'Full Score', 'Flute', 'Oboe', 'Clarinet', 'Bassoon', 'Saxophone', 'Horn', 'Trumpet', 'Trombone', 'Tuba', 'Violin', 'Viola', 'Cello', 'Contrabass', 'Percussion', '未分類'];
@@ -629,7 +629,7 @@ pageList = pageList.filter(p => !p.selected);
 renderPagesGrid();
 renderPartCategories();
 }
-// NVIDIA Vision AI: send rendered page images through the Cloudflare Worker
+// Gemini Vision AI: send the entire rendered page through the Cloudflare Worker
 function blobToDataUrl(blob) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -670,9 +670,9 @@ function normalizeAiPartName(value) {
   }
   return "";
 }
-async function requestNvidiaPart(imageBlob) {
+async function requestGeminiPart(imageBlob) {
   const image = await blobToDataUrl(imageBlob);
-  const response = await fetch(NVIDIA_WORKER_URL + "/", {
+  const response = await fetch(GEMINI_WORKER_URL + "/", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ image })
@@ -681,9 +681,10 @@ async function requestNvidiaPart(imageBlob) {
   try { data = await response.json(); } catch (_) {}
   if (!response.ok) {
     const detail = data.details ? "：" + data.details : "";
-    throw new Error((data.error || "NVIDIA AIへの接続に失敗しました") + detail);
+    throw new Error((data.error || "Gemini AIへの接続に失敗しました") + detail);
   }
-  return normalizeAiPartName(data.partName || "");
+  if (data.recognized === false) return ""; 
+  return normalizeAiPartName(data.partName || data.instrument || data.result || "");
 }
 async function runAIRecognition() {
   if (isRecognizing) return;
@@ -700,15 +701,11 @@ async function runAIRecognition() {
     for (let i = 0; i < pageList.length; i++) {
       const pageItem = pageList[i];
       try {
-        button.innerHTML = `<span>NVIDIA AI認識中 ${i + 1}/${pageList.length}</span>`;
-        showToast(`NVIDIA AIで認識中 ${i + 1}/${pageList.length}ページ`, 'info');
+        button.innerHTML = `<span>Gemini AI認識中 ${i + 1}/${pageList.length}</span>`;
+        showToast(`Gemini AIで認識中 ${i + 1}/${pageList.length}ページ`, 'info');
         const pageBlob = await extractPageImageBlob(pageItem);
         if (!pageBlob || pageBlob.size === 0) throw new Error('ページ画像を作成できませんでした');
-        let part = await requestNvidiaPart(pageBlob);
-        if (!part) {
-          const headerBlob = await extractPageHeaderBlob(pageItem);
-          part = await requestNvidiaPart(headerBlob);
-        }
+        const part = await requestGeminiPart(pageBlob);
         if (!part) throw new Error('AIが楽器名・パート名を特定できませんでした');
         let matched = partCategories.find(c => c.toLowerCase() === part.toLowerCase());
         if (!matched) {
@@ -721,7 +718,7 @@ async function runAIRecognition() {
         failedCount++;
         const reason = err && err.message ? String(err.message) : '原因不明のエラー';
         failureDetails.push({ page: i + 1, reason: reason.slice(0, 120) });
-        console.error(`NVIDIA AI recognition failed on page ${i + 1}:`, err);
+        console.error(`Gemini AI recognition failed on page ${i + 1}:`, err);
       }
       if ((i + 1) % 2 === 0 || i === pageList.length - 1) {
         await new Promise(resolve => setTimeout(resolve, 100));
@@ -731,10 +728,10 @@ async function runAIRecognition() {
     renderPagesGrid();
     const firstFailure = failureDetails[0];
     const failureSummary = firstFailure ? `（例：P${firstFailure.page} ${firstFailure.reason}）` : '';
-    showToast(`NVIDIA AI認識完了：${detectedCount}ページ成功${failedCount ? `、${failedCount}ページ失敗 ${failureSummary}` : ''}`, failedCount ? 'error' : 'success');
+    showToast(`Gemini AI認識完了：${detectedCount}ページ成功${failedCount ? `、${failedCount}ページ失敗 ${failureSummary}` : ''}`, failedCount ? 'error' : 'success');
   } catch (err) {
     console.error('NVIDIA AI recognition failed:', err);
-    showToast('NVIDIA AI認識に失敗しました。Workerの設定とAPI利用枠を確認してください。', 'error');
+    showToast('Gemini AI認識に失敗しました。Workerの設定とAPI利用枠を確認してください。', 'error');
   } finally {
     isRecognizing = false;
     button.disabled = false;
@@ -743,7 +740,7 @@ async function runAIRecognition() {
     if (window.lucide) lucide.createIcons();
   }
 }
-// ページ全体を低メモリ設定でJPEG Blob化
+// ページ全体を高解像度JPEG Blob化（ヘッダー切り抜きは行わない）
 async function extractPageImageBlob(pageItem) {
   let pdfDoc = null;
   let page = null;
@@ -751,12 +748,12 @@ async function extractPageImageBlob(pageItem) {
   try {
     pdfDoc = await pdfjsLib.getDocument({
       data: new Uint8Array(pageItem.pdfBuffer.slice(0)),
-      maxImageSize: 1600000
+      maxImageSize: 4200000
     }).promise;
     page = await pdfDoc.getPage(pageItem.pageNum);
     const baseViewport = page.getViewport({ scale: 1 });
-    const maxSide = 1300;
-    const maxPixels = 1600000;
+    const maxSide = 2200;
+    const maxPixels = 4200000;
     const sideScale = maxSide / Math.max(baseViewport.width, baseViewport.height);
     const pixelScale = Math.sqrt(maxPixels / (baseViewport.width * baseViewport.height));
     const scale = Math.min(1.5, sideScale, pixelScale);
@@ -770,7 +767,7 @@ async function extractPageImageBlob(pageItem) {
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     await page.render({ canvasContext: ctx, viewport }).promise;
     return await new Promise((resolve, reject) => {
-      canvas.toBlob(result => result ? resolve(result) : reject(new Error('画像圧縮に失敗しました')), 'image/jpeg', 0.78);
+      canvas.toBlob(result => result ? resolve(result) : reject(new Error('画像圧縮に失敗しました')), 'image/jpeg', 0.9);
     });
   } catch (err) {
     console.error('Full page image extraction error:', err);
