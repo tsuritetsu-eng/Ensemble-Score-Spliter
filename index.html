@@ -757,10 +757,8 @@ function updateEnsembleSelectionLabel() {
 }
 function getEnabledEnsembleCategories() {
   const enabled = document.getElementById("ensemble-filter-enabled");
-  if (!enabled || !enabled.checked) return null;
-  if (!selectedEnsembleInstruments.length) {
-    throw new Error("編成で絞り込む場合は、楽器を1種類以上選択してください");
-  }
+  // 絞り込みがOFF、または楽器が未選択なら全楽器を候補にする。
+  if (!enabled || !enabled.checked || selectedEnsembleInstruments.length === 0) return null;
   return selectedEnsembleInstruments;
 }
 
