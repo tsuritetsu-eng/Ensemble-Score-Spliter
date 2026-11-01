@@ -875,7 +875,8 @@ async function extractPageHeaderBlob(pageItem) {
     }).promise;
     page = await pdfDoc.getPage(pageItem.pageNum);
     const baseViewport = page.getViewport({ scale: 1 });
-    const scale = Math.min(1.8, 1800 / Math.max(baseViewport.width, baseViewport.height));
+    // Render sharply, then isolate the upper-left area where part labels are commonly printed.
+    const scale = Math.min(3.2, 2600 / Math.max(baseViewport.width, baseViewport.height));
     const viewport = page.getViewport({ scale });
     sourceCanvas = document.createElement('canvas');
     sourceCanvas.width = Math.ceil(viewport.width);
@@ -885,16 +886,20 @@ async function extractPageHeaderBlob(pageItem) {
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, sourceCanvas.width, sourceCanvas.height);
     await page.render({ canvasContext: ctx, viewport }).promise;
+
+    // The instrument label is usually near the top-left; avoid sending the full title and score.
+    const cropWidth = Math.min(sourceCanvas.width, Math.ceil(sourceCanvas.width * 0.32));
+    const cropHeight = Math.min(sourceCanvas.height, Math.ceil(sourceCanvas.height * 0.19));
     headerCanvas = document.createElement('canvas');
-    headerCanvas.width = sourceCanvas.width;
-    headerCanvas.height = Math.max(1, Math.ceil(sourceCanvas.height * 0.3));
+    headerCanvas.width = cropWidth;
+    headerCanvas.height = cropHeight;
     const headerCtx = headerCanvas.getContext('2d', { alpha: false });
-    if (!headerCtx) throw new Error('上部画像を初期化できません');
+    if (!headerCtx) throw new Error('楽器名画像を初期化できません');
     headerCtx.fillStyle = '#ffffff';
-    headerCtx.fillRect(0, 0, headerCanvas.width, headerCanvas.height);
-    headerCtx.drawImage(sourceCanvas, 0, 0, sourceCanvas.width, headerCanvas.height, 0, 0, headerCanvas.width, headerCanvas.height);
+    headerCtx.fillRect(0, 0, cropWidth, cropHeight);
+    headerCtx.drawImage(sourceCanvas, 0, 0, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
     return await new Promise((resolve, reject) => {
-      headerCanvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('上部画像の圧縮に失敗しました')), 'image/jpeg', 0.88);
+      headerCanvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('楽器名画像の圧縮に失敗しました')), 'image/jpeg', 0.94);
     });
   } finally {
     if (page) { try { page.cleanup(); } catch (_) {} }
