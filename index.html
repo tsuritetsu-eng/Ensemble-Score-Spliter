@@ -441,11 +441,7 @@ const cropCanvas = document.getElementById('crop-canvas');
 const cropOverlay = document.getElementById('crop-overlay');
 const cropPreviewViewport = document.getElementById('crop-preview-viewport');
 const cropCanvasWrapper = document.getElementById('crop-canvas-wrapper');
-let cropInteractionMode = 'select';
-const cropModeSelectButton = null;
-const cropModePanButton = null;
 cropPreviewViewport.style.touchAction = 'none';
-let cropPanTouch = null;
 cropCanvas.addEventListener('pointerdown', e => {
   if (e.pointerType === 'touch' || (e.pointerType === 'mouse' && e.button !== 0)) return;
   const rect = cropCanvas.getBoundingClientRect();
@@ -501,27 +497,6 @@ cropCanvas.addEventListener('touchmove', e => {
 const finishCropTouch = () => { cropDragStart = null; };
 cropCanvas.addEventListener('touchend', finishCropTouch);
 cropCanvas.addEventListener('touchcancel', finishCropTouch);
-cropPreviewViewport.addEventListener('pointerdown', e => {
-  if (cropInteractionMode !== 'pan' || cropIsPinching || e.target.closest('button') || (e.pointerType === 'mouse' && e.button !== 0)) return;
-  cropPanPointer = { id: e.pointerId, x: e.clientX, y: e.clientY, left: cropPreviewViewport.scrollLeft, top: cropPreviewViewport.scrollTop };
-  try { cropPreviewViewport.setPointerCapture(e.pointerId); } catch (_) {}
-  cropCanvas.style.cursor = 'grabbing';
-  e.preventDefault();
-});
-cropPreviewViewport.addEventListener('pointermove', e => {
-  if (!cropPanPointer || cropPanPointer.id !== e.pointerId || cropIsPinching) return;
-  cropPreviewViewport.scrollLeft = cropPanPointer.left - (e.clientX - cropPanPointer.x);
-  cropPreviewViewport.scrollTop = cropPanPointer.top - (e.clientY - cropPanPointer.y);
-  e.preventDefault();
-});
-const finishCropPan = e => {
-  if (cropPanPointer && (!e || cropPanPointer.id === e.pointerId)) {
-    cropPanPointer = null;
-    cropCanvas.style.cursor = 'grab';
-  }
-};
-cropPreviewViewport.addEventListener('pointerup', finishCropPan);
-cropPreviewViewport.addEventListener('pointercancel', finishCropPan);
 const updateCropOverlay = (x, y, w, h) => {
 const rect = cropCanvas.getBoundingClientRect();
 const scaleX = rect.width / Math.max(1, cropCanvas.width);
@@ -1673,8 +1648,7 @@ try {
   overlay.classList.add('hidden');
   activeCropSelection = null;
   cropDragStart = null;
-  cropPanTouch = null;
-
+  
   // Fit the high-resolution bitmap into the visible preview area at 100%.
   // Zoom changes its CSS display size, not the source bitmap dimensions.
   const availableWidth = Math.max(160, cropPreviewViewport.clientWidth - 32);
