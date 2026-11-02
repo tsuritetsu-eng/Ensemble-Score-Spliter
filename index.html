@@ -530,7 +530,7 @@ const finishCropPinch = e => {
 cropPreviewViewport.addEventListener('touchend', finishCropPinch);
 cropPreviewViewport.addEventListener('touchcancel', finishCropPinch);
 cropCanvas.addEventListener('pointerdown', e => {
-  if (cropInteractionMode !== 'select' || cropIsPinching || (e.pointerType === 'mouse' && e.button !== 0)) return;
+  if (e.pointerType === 'touch' || cropInteractionMode !== 'select' || cropIsPinching || (e.pointerType === 'mouse' && e.button !== 0)) return;
   const rect = cropCanvas.getBoundingClientRect();
   const x = Math.max(0, Math.min(cropCanvas.width, (e.clientX - rect.left) * cropCanvas.width / Math.max(1, rect.width)));
   const y = Math.max(0, Math.min(cropCanvas.height, (e.clientY - rect.top) * cropCanvas.height / Math.max(1, rect.height)));
@@ -541,7 +541,7 @@ cropCanvas.addEventListener('pointerdown', e => {
   e.preventDefault();
 });
 cropCanvas.addEventListener('pointermove', e => {
-  if (!cropDragStart || cropIsPinching || cropInteractionMode !== 'select') return;
+  if (e.pointerType === 'touch' || !cropDragStart || cropIsPinching || cropInteractionMode !== 'select') return;
   const rect = cropCanvas.getBoundingClientRect();
   const x = Math.max(0, Math.min(cropCanvas.width, (e.clientX - rect.left) * cropCanvas.width / Math.max(1, rect.width)));
   const y = Math.max(0, Math.min(cropCanvas.height, (e.clientY - rect.top) * cropCanvas.height / Math.max(1, rect.height)));
@@ -553,6 +553,37 @@ cropCanvas.addEventListener('pointermove', e => {
 const finishCropPointer = () => { cropDragStart = null; };
 cropCanvas.addEventListener('pointerup', finishCropPointer);
 cropCanvas.addEventListener('pointercancel', finishCropPointer);
+// iOS Safari fallback: handle one-finger crop selection with native touch events.
+function getCropTouchPoint(touch) {
+  const rect = cropCanvas.getBoundingClientRect();
+  return {
+    x: Math.max(0, Math.min(cropCanvas.width, (touch.clientX - rect.left) * cropCanvas.width / Math.max(1, rect.width))),
+    y: Math.max(0, Math.min(cropCanvas.height, (touch.clientY - rect.top) * cropCanvas.height / Math.max(1, rect.height)))
+  };
+}
+cropCanvas.addEventListener('touchstart', e => {
+  if (e.touches.length !== 1 || cropInteractionMode !== 'select' || cropIsPinching) return;
+  const point = getCropTouchPoint(e.touches[0]);
+  cropDragStart = point;
+  activeCropSelection = { x: point.x, y: point.y, width: 1, height: 1 };
+  updateCropOverlay(point.x, point.y, 1, 1);
+  e.preventDefault();
+}, { passive: false });
+cropCanvas.addEventListener('touchmove', e => {
+  if (e.touches.length !== 1 || !cropDragStart || cropInteractionMode !== 'select' || cropIsPinching) return;
+  const point = getCropTouchPoint(e.touches[0]);
+  activeCropSelection = {
+    x: Math.min(cropDragStart.x, point.x),
+    y: Math.min(cropDragStart.y, point.y),
+    width: Math.abs(point.x - cropDragStart.x),
+    height: Math.abs(point.y - cropDragStart.y)
+  };
+  updateCropOverlay(cropDragStart.x, cropDragStart.y, point.x - cropDragStart.x, point.y - cropDragStart.y);
+  e.preventDefault();
+}, { passive: false });
+const finishCropTouch = () => { if (!cropIsPinching) cropDragStart = null; };
+cropCanvas.addEventListener('touchend', finishCropTouch);
+cropCanvas.addEventListener('touchcancel', finishCropTouch);
 cropPreviewViewport.addEventListener('pointerdown', e => {
   if (cropInteractionMode !== 'pan' || cropIsPinching || e.target.closest('button') || (e.pointerType === 'mouse' && e.button !== 0)) return;
   cropPanPointer = { id: e.pointerId, x: e.clientX, y: e.clientY, left: cropPreviewViewport.scrollLeft, top: cropPreviewViewport.scrollTop };
