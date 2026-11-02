@@ -348,6 +348,7 @@ let cropBaseSize = null;
 let cropTouchPoints = new Map();
 let cropPinchStartDistance = 0;
 let cropPinchStartZoom = 1;
+let cropPinchAnchor = null;
 let activeThumbnailRenders = 0;
 const thumbnailQueue = [];
 const MAX_THUMBNAIL_RENDERS = 2;
@@ -517,11 +518,14 @@ cropPreviewViewport.addEventListener('touchstart', e => {
     cropPanTouch = null;
     cropIsPinching = true;
     cropDragStart = null;
-    activeCropSelection = null;
-    cropOverlay.classList.add('hidden');
     const a = e.touches[0], b = e.touches[1];
     cropPinchStartDistance = Math.max(1, Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY));
     cropPinchStartZoom = cropZoom;
+    const rect = cropPreviewViewport.getBoundingClientRect();
+    cropPinchAnchor = {
+      x: (cropPreviewViewport.scrollLeft + (a.clientX + b.clientX) / 2 - rect.left) / cropZoom,
+      y: (cropPreviewViewport.scrollTop + (a.clientY + b.clientY) / 2 - rect.top) / cropZoom
+    };
     e.preventDefault();
   }
 }, { passive: false });
@@ -538,13 +542,20 @@ cropPreviewViewport.addEventListener('touchmove', e => {
   const distance = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
   const midpointX = (a.clientX + b.clientX) / 2;
   const midpointY = (a.clientY + b.clientY) / 2;
-  applyCropZoom(cropPinchStartZoom * distance / cropPinchStartDistance, midpointX, midpointY);
+  const nextZoom = Math.max(1, Math.min(4, cropPinchStartZoom * distance / cropPinchStartDistance));
+  applyCropZoom(nextZoom);
+  const rect = cropPreviewViewport.getBoundingClientRect();
+  if (cropPinchAnchor) {
+    cropPreviewViewport.scrollLeft = Math.max(0, cropPinchAnchor.x * cropZoom - (midpointX - rect.left));
+    cropPreviewViewport.scrollTop = Math.max(0, cropPinchAnchor.y * cropZoom - (midpointY - rect.top));
+  }
   e.preventDefault();
 }, { passive: false });
 const finishCropPinch = e => {
   if (e.touches.length < 2) {
     cropIsPinching = false;
     cropPinchStartDistance = 0;
+    cropPinchAnchor = null;
     cropDragStart = null;
   }
   if (e.touches.length === 0) {
