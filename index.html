@@ -487,10 +487,10 @@ function applyCropZoom(nextZoom, focalClientX = null, focalClientY = null) {
     });
   }
 }
-document.getElementById('crop-zoom-in').addEventListener('click', () => setCropZoomSize(cropZoom + 0.25));
-document.getElementById('crop-zoom-out').addEventListener('click', () => setCropZoomSize(cropZoom - 0.25));
+document.getElementById('crop-zoom-in').addEventListener('click', () => applyCropZoom(cropZoom + 0.25));
+document.getElementById('crop-zoom-out').addEventListener('click', () => applyCropZoom(cropZoom - 0.25));
 document.getElementById('crop-zoom-reset').addEventListener('click', () => {
-  setCropZoomSize(1);
+  applyCropZoom(1);
   cropPreviewViewport.scrollTo({ left: 0, top: 0, behavior: 'smooth' });
 });
 // Gesture handling: one-finger crop or pan; two-finger pinch zoom around the touched point.
@@ -582,7 +582,7 @@ cropPreviewViewport.addEventListener('pointermove', e => {
   if (cropPointers.size >= 2 && cropGestureMode === 'pinch') {
     const midpoint = cropMidpoint();
     const distance = cropDistance();
-    setCropZoomSize(cropPinchStartZoom * distance / cropPinchStartDistance);
+    applyCropZoom(cropPinchStartZoom * distance / cropPinchStartDistance, midpoint.x, midpoint.y);
     const rect = cropPreviewViewport.getBoundingClientRect();
     cropPreviewViewport.scrollLeft = Math.max(0, cropPinchAnchorX * cropZoom - (midpoint.x - rect.left));
     cropPreviewViewport.scrollTop = Math.max(0, cropPinchAnchorY * cropZoom - (midpoint.y - rect.top));
@@ -633,26 +633,6 @@ cropOverlay.style.top = `${Math.min(y, y + h) * scaleY}px`;
 cropOverlay.style.width = `${Math.abs(w) * scaleX}px`;
 cropOverlay.style.height = `${Math.abs(h) * scaleY}px`;
 };
-cropCanvas.addEventListener('pointerdown', (e) => {
-const r = cropCanvas.getBoundingClientRect();
-const x = (e.clientX - r.left) * cropCanvas.width / r.width;
-const y = (e.clientY - r.top) * cropCanvas.height / r.height;
-cropDragStart = { x, y };
-activeCropSelection = { x, y, width: 1, height: 1 };
-cropCanvas.setPointerCapture(e.pointerId);
-updateCropOverlay(x, y, 1, 1);
-});
-cropCanvas.addEventListener('pointermove', (e) => {
-if (!cropDragStart) return;
-const r = cropCanvas.getBoundingClientRect();
-const x = (e.clientX - r.left) * cropCanvas.width / r.width;
-const y = (e.clientY - r.top) * cropCanvas.height / r.height;
-activeCropSelection = { x: Math.min(cropDragStart.x, x), y: Math.min(cropDragStart.y, y), width: Math.abs(x - cropDragStart.x), height: Math.abs(y - cropDragStart.y) };
-updateCropOverlay(cropDragStart.x, cropDragStart.y, x - cropDragStart.x, y - cropDragStart.y);
-});
-const finishCropPointer = () => { cropDragStart = null; };
-cropCanvas.addEventListener('pointerup', finishCropPointer);
-cropCanvas.addEventListener('pointercancel', finishCropPointer);
 document.getElementById('btn-reset-crop').addEventListener('click', () => {
 if (activeCropPageIndex === null) return;
 pageList[activeCropPageIndex].cropBox = null;
