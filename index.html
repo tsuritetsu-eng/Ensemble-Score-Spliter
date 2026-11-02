@@ -291,11 +291,31 @@ A3横長などの見開き譜面を真ん中で独立した2枚のページ（A4
 </div>
 </div>
 </div>
-<div class="p-4 bg-slate-50 dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700 flex items-center justify-between text-xs">
-<button id="btn-reset-crop" class="px-3 py-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 rounded font-medium">全範囲に戻す</button>
+<div class="p-4 bg-slate-50 dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700 space-y-3">
+<div>
+<div class="text-xs font-bold text-slate-600 dark:text-slate-300 mb-2">切り抜き範囲の適用先</div>
+<div class="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+<label class="flex items-start gap-2 rounded-lg border border-slate-200 dark:border-slate-600 p-2 cursor-pointer">
+<input type="radio" name="crop-apply-target" value="current" checked class="mt-0.5 accent-brand-600">
+<span><strong class="block text-slate-700 dark:text-slate-200">このページだけ</strong><span class="text-slate-500">現在のページに適用</span></span>
+</label>
+<label class="flex items-start gap-2 rounded-lg border border-slate-200 dark:border-slate-600 p-2 cursor-pointer">
+<input type="radio" name="crop-apply-target" value="all" class="mt-0.5 accent-brand-600">
+<span><strong class="block text-slate-700 dark:text-slate-200">アップロードした全ページ</strong><span class="text-slate-500">読み込んだ全ページに適用</span></span>
+</label>
+<label class="flex items-start gap-2 rounded-lg border border-slate-200 dark:border-slate-600 p-2 cursor-pointer">
+<input type="radio" name="crop-apply-target" value="selected" class="mt-0.5 accent-brand-600">
+<span><strong class="block text-slate-700 dark:text-slate-200">選択したページだけ</strong><span class="text-slate-500">一覧でチェックしたページに適用</span></span>
+</label>
+</div>
+<p id="crop-apply-target-note" class="text-[11px] text-slate-500 mt-2">現在のページだけに適用します。</p>
+</div>
+<div class="flex items-center justify-between text-xs">
+<button id="btn-reset-crop" class="px-3 py-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 rounded font-medium">このページを全範囲に戻す</button>
 <div class="space-x-2">
 <button id="btn-cancel-crop" class="px-4 py-2 bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg font-medium">キャンセル</button>
 <button id="btn-apply-crop" class="px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-lg font-medium shadow-sm">切り抜きを適用</button>
+</div>
 </div>
 </div>
 </div>
@@ -457,20 +477,57 @@ if (activeCropPageIndex === null) return;
 pageList[activeCropPageIndex].cropBox = null;
 activeCropSelection = null;
 cropOverlay.classList.add('hidden');
-showToast('切り抜き範囲をリセットしました', 'success');
+showToast('このページの切り抜き範囲をリセットしました', 'success');
+});
+const cropTargetNote = document.getElementById('crop-apply-target-note');
+document.querySelectorAll('input[name="crop-apply-target"]').forEach(input => {
+  input.addEventListener('change', () => {
+    const target = document.querySelector('input[name="crop-apply-target"]:checked')?.value || 'current';
+    cropTargetNote.textContent = target === 'all'
+      ? 'ページサイズが異なる場合も、現在のページに対する位置・大きさの割合で適用します。'
+      : target === 'selected'
+        ? 'ページ一覧でチェックしたページに、同じ割合の切り抜き範囲を適用します。'
+        : '現在のページだけに適用します。';
+  });
 });
 document.getElementById('btn-apply-crop').addEventListener('click', () => {
 if (activeCropPageIndex === null || !activeCropSelection || activeCropSelection.width < 5 || activeCropSelection.height < 5) {
 showToast('キャンバス上をドラッグして切り抜き範囲を選択してください', 'error'); return;
 }
-const item = pageList[activeCropPageIndex];
-const sx = item.width / cropCanvas.width;
-const sy = item.height / cropCanvas.height;
-const box = activeCropSelection;
-item.cropBox = { x: box.x * sx, y: item.height - (box.y + box.height) * sy, width: box.width * sx, height: box.height * sy };
+const source = pageList[activeCropPageIndex];
+const fractions = {
+  x: activeCropSelection.x / cropCanvas.width,
+  y: activeCropSelection.y / cropCanvas.height,
+  width: activeCropSelection.width / cropCanvas.width,
+  height: activeCropSelection.height / cropCanvas.height
+};
+const target = document.querySelector('input[name="crop-apply-target"]:checked')?.value || 'current';
+let targets = target === 'all'
+  ? pageList.slice()
+  : target === 'selected'
+    ? pageList.filter(page => page.selected)
+    : [source];
+if (target === 'selected' && targets.length === 0) {
+  showToast('適用先のページを一覧で選択してください', 'error'); return;
+}
+if (!targets.some(page => page.id === source.id) && target === 'current') targets = [source];
+targets.forEach(item => {
+  const width = Number(item.width) || source.width;
+  const height = Number(item.height) || source.height;
+  const x = fractions.x * width;
+  const yTop = fractions.y * height;
+  const cropWidth = fractions.width * width;
+  const cropHeight = fractions.height * height;
+  item.cropBox = {
+    x,
+    y: height - (yTop + cropHeight),
+    width: cropWidth,
+    height: cropHeight
+  };
+});
 closeCropModal();
 renderPagesGrid();
-showToast('切り抜き範囲を適用しました', 'success');
+showToast(`${targets.length}ページに切り抜き範囲を適用しました`, 'success');
 });
 }
 // Handle File Selection
