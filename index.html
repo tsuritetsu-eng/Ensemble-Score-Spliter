@@ -288,7 +288,7 @@ A3横長などの見開き譜面を真ん中で独立した2枚のページ（A4
 <button id="crop-zoom-reset" type="button" class="px-2 h-9 rounded-md text-xs text-white hover:bg-slate-700">リセット</button>
 </div>
 <div id="crop-canvas-wrapper" class="relative inline-block border border-slate-700 shadow-lg shrink-0">
-<canvas id="crop-canvas" class="block touch-none cursor-crosshair">
+<canvas id="crop-canvas" class="block max-w-full max-h-[30dvh] sm:max-h-[58vh] touch-none cursor-crosshair">
 <div id="crop-overlay" class="absolute border-2 border-brand-500 bg-brand-500/20 cursor-move hidden">
 <div class="absolute -top-1.5 -left-1.5 w-3 h-3 bg-white border border-brand-500"></div>
 <div class="absolute -top-1.5 -right-1.5 w-3 h-3 bg-white border border-brand-500"></div>
@@ -477,6 +477,8 @@ document.getElementById('crop-zoom-reset').addEventListener('click', () => {
 cropPreviewViewport.addEventListener('touchstart', e => {
   if (e.touches.length === 2) {
     cropDragStart = null;
+    activeCropSelection = null;
+    cropOverlay.classList.add('hidden');
     const a = e.touches[0], b = e.touches[1];
     cropPinchStartDistance = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
     cropPinchStartZoom = cropZoom;
