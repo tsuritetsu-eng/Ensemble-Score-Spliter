@@ -900,14 +900,45 @@ async function extractPageTextLabel(pageItem) {
     pdfDoc = await pdfjsLib.getDocument({ data: new Uint8Array(pageItem.pdfBuffer.slice(0)) }).promise;
     const page = await pdfDoc.getPage(pageItem.pageNum);
     try {
+      const viewport = page.getViewport({ scale: 1 });
+      const crop = pageItem.cropBox ? getCropViewportBounds(pageItem.cropBox, viewport) : null;
       const content = await page.getTextContent();
-      return cleanOcrText((content.items || []).map(item => item.str || '').join(' '));
+      const visibleItems = (content.items || []).filter(item => {
+        if (!crop) return true;
+        if (!item.str || !item.str.trim() || !item.transform) return false;
+        const tx = pdfjsLib.Util.transform(viewport.transform, item.transform);
+        const x = tx[4];
+        const y = tx[5];
+        const margin = Math.max(2, Number(item.height) || 0);
+        return x >= crop.left - margin && x <= crop.right + margin &&
+          y >= crop.top - margin * 2 && y <= crop.bottom + margin * 2;
+      });
+      return cleanOcrText(visibleItems.map(item => item.str || '').join(' '));
     } finally {
       page.cleanup();
     }
   } finally {
     if (pdfDoc) { try { await pdfDoc.destroy(); } catch (_) {} }
   }
+}
+
+// cropBox はPDF座標（左下原点）。PDF.jsのViewport座標（左上原点）へ変換する。
+function getCropViewportBounds(cropBox, viewport) {
+  if (!cropBox || !viewport) return null;
+  const points = [
+    viewport.convertToViewportPoint(cropBox.x, cropBox.y),
+    viewport.convertToViewportPoint(cropBox.x + cropBox.width, cropBox.y),
+    viewport.convertToViewportPoint(cropBox.x, cropBox.y + cropBox.height),
+    viewport.convertToViewportPoint(cropBox.x + cropBox.width, cropBox.y + cropBox.height)
+  ];
+  const xs = points.map(point => point[0]);
+  const ys = points.map(point => point[1]);
+  return {
+    left: Math.max(0, Math.floor(Math.min(...xs))),
+    top: Math.max(0, Math.floor(Math.min(...ys))),
+    right: Math.min(viewport.width, Math.ceil(Math.max(...xs))),
+    bottom: Math.min(viewport.height, Math.ceil(Math.max(...ys)))
+  };
 }
 
 function normalizeAiPartName(value, allowedCategories = null) {
@@ -1265,6 +1296,7 @@ async function extractPageLabelBlobs(pageItem) {
   let pdfDoc = null;
   let page = null;
   let sourceCanvas = null;
+  let recognitionCanvas = null;
   const crops = [];
   try {
     pdfDoc = await pdfjsLib.getDocument({
@@ -1284,16 +1316,39 @@ async function extractPageLabelBlobs(pageItem) {
     ctx.fillRect(0, 0, sourceCanvas.width, sourceCanvas.height);
     await page.render({ canvasContext: ctx, viewport }).promise;
 
-    // パート名はページ左上または上部中央に置かれるため、上部全幅を対象にする。
-    const regions = [
-      { x: 0.02, y: 0.025, w: 0.96, h: 0.16 },
-      { x: 0.02, y: 0.0, w: 0.96, h: 0.22 }
-    ];
+    // 手動トリミング・見開き分割済みなら、そのcropBox内だけをOCR対象にする。
+    let recognitionSource = sourceCanvas;
+    if (pageItem.cropBox) {
+      const bounds = getCropViewportBounds(pageItem.cropBox, viewport);
+      const width = Math.max(1, bounds.right - bounds.left);
+      const height = Math.max(1, bounds.bottom - bounds.top);
+      recognitionCanvas = document.createElement('canvas');
+      recognitionCanvas.width = width;
+      recognitionCanvas.height = height;
+      const cropCtx = recognitionCanvas.getContext('2d', { alpha: false });
+      if (!cropCtx) throw new Error('切り抜き画像を初期化できません');
+      cropCtx.fillStyle = '#ffffff';
+      cropCtx.fillRect(0, 0, width, height);
+      cropCtx.drawImage(sourceCanvas, bounds.left, bounds.top, width, height, 0, 0, width, height);
+      recognitionSource = recognitionCanvas;
+    }
+
+    // cropBoxがある場合は切り抜き領域全体と、その上部を認識する。
+    // cropBoxがない場合は従来どおりページ上部の全幅を対象にする。
+    const regions = pageItem.cropBox
+      ? [
+          { x: 0, y: 0, w: 1, h: 1 },
+          { x: 0, y: 0, w: 1, h: 0.45 }
+        ]
+      : [
+          { x: 0.02, y: 0.025, w: 0.96, h: 0.16 },
+          { x: 0.02, y: 0.0, w: 0.96, h: 0.22 }
+        ];
     for (const region of regions) {
-      const sx = Math.floor(sourceCanvas.width * region.x);
-      const sy = Math.floor(sourceCanvas.height * region.y);
-      const sw = Math.min(sourceCanvas.width - sx, Math.ceil(sourceCanvas.width * region.w));
-      const sh = Math.min(sourceCanvas.height - sy, Math.ceil(sourceCanvas.height * region.h));
+      const sx = Math.floor(recognitionSource.width * region.x);
+      const sy = Math.floor(recognitionSource.height * region.y);
+      const sw = Math.max(1, Math.min(recognitionSource.width - sx, Math.ceil(recognitionSource.width * region.w)));
+      const sh = Math.max(1, Math.min(recognitionSource.height - sy, Math.ceil(recognitionSource.height * region.h)));
       const crop = document.createElement('canvas');
       const factor = Math.min(3, 1800 / Math.max(sw, sh));
       crop.width = Math.max(1, Math.ceil(sw * factor));
@@ -1304,9 +1359,9 @@ async function extractPageLabelBlobs(pageItem) {
       cropCtx.fillRect(0, 0, crop.width, crop.height);
       cropCtx.imageSmoothingEnabled = true;
       cropCtx.imageSmoothingQuality = 'high';
-      cropCtx.drawImage(sourceCanvas, sx, sy, sw, sh, 0, 0, crop.width, crop.height);
+      cropCtx.drawImage(recognitionSource, sx, sy, sw, sh, 0, 0, crop.width, crop.height);
 
-      // Remove faint red stamp influence while preserving dark printed instrument text.
+      // 薄い赤い印影を除去し、印刷された文字を残す。
       const image = cropCtx.getImageData(0, 0, crop.width, crop.height);
       const pixels = image.data;
       for (let p = 0; p < pixels.length; p += 4) {
@@ -1329,6 +1384,7 @@ async function extractPageLabelBlobs(pageItem) {
     if (page) { try { page.cleanup(); } catch (_) {} }
     if (pdfDoc) { try { await pdfDoc.destroy(); } catch (_) {} }
     if (sourceCanvas) { sourceCanvas.width = 0; sourceCanvas.height = 0; }
+    if (recognitionCanvas) { recognitionCanvas.width = 0; recognitionCanvas.height = 0; }
   }
 }
 async function extractPageHeaderBlob(pageItem) {
