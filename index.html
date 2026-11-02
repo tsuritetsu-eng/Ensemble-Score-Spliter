@@ -1761,7 +1761,16 @@ let page = null;
 try {
 pdfDoc = await pdfjsLib.getDocument({ data: new Uint8Array(pageItem.pdfBuffer.slice(0)) }).promise;
 page = await pdfDoc.getPage(pageItem.pageNum);
-const viewport = page.getViewport({ scale: 0.8 });
+const baseViewport = page.getViewport({ scale: 1 });
+const baseArea = baseViewport.width * baseViewport.height;
+// Crop editor only: render a sharper source bitmap than the list thumbnails.
+// Cap both the longest edge and total pixels to keep iPhone memory usage bounded.
+const cropRenderScale = Math.min(
+  1.8,
+  3200 / Math.max(baseViewport.width, baseViewport.height),
+  Math.sqrt(12000000 / Math.max(1, baseArea))
+);
+const viewport = page.getViewport({ scale: Math.max(1, cropRenderScale) });
 canvas.width = Math.ceil(viewport.width);
 canvas.height = Math.ceil(viewport.height);
 const ctx = canvas.getContext('2d', { alpha: false });
