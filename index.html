@@ -350,163 +350,6 @@ let cropBaseSize = null;
 let cropTouchPoints = new Map();
 let cropPinchStartDistance = 0;
 let cropPinchStartZoom = 1;
-let activeThumbnailRenders = 0;
-const thumbnailQueue = [];
-const MAX_THUMBNAIL_RENDERS = 2;
-let isRecognizing = false;
-let spreadPositionPercent = 50;
-// DOM Elements
-const dropZone = document.getElementById('drop-zone');
-const emptyState = document.getElementById('empty-state');
-const pagesGrid = document.getElementById('pages-grid');
-const fileInput = document.getElementById('file-input');
-const pageCountBadge = document.getElementById('page-count-badge');
-const filterStatus = document.getElementById('filter-status');
-const partCategoryList = document.getElementById('part-category-list');
-const exportMenu = document.getElementById('export-menu');
-// Initial Setup
-document.addEventListener('DOMContentLoaded', () => {
-lucide.createIcons();
-renderPartCategories();
-setupEventListeners();
-});
-// Notifications Helper
-function showToast(msg, type = 'info') {
-const toast = document.getElementById('toast');
-const toastMsg = document.getElementById('toast-msg');
-const toastIcon = document.getElementById('toast-icon');
-toastMsg.innerText = msg;
-toast.className = `fixed bottom-5 right-5 z-50 flex items-center space-x-2 px-4 py-3 rounded-xl shadow-lg text-sm font-medium transition-all duration-300 text-white ${ type === 'error' ? 'bg-red-600' : type === 'success' ? 'bg-emerald-600' : 'bg-slate-800' }`;
-toast.classList.remove('translate-y-20', 'opacity-0');
-setTimeout(() => {
-toast.classList.add('translate-y-20', 'opacity-0');
-}, type === 'error' ? 7000 : 3500);
-}
-// Event Listeners Registration
-function setupEventListeners() {
-// Theme Toggle
-document.getElementById('btn-theme').addEventListener('click', () => {
-document.documentElement.classList.toggle('dark');
-});
-// Export Dropdown Toggle
-document.getElementById('btn-export-dropdown').addEventListener('click', (e) => {
-e.stopPropagation();
-exportMenu.classList.toggle('hidden');
-});
-document.addEventListener('click', () => exportMenu.classList.add('hidden'));
-// File Upload Button
-document.getElementById('btn-add-file').addEventListener('click', () => fileInput.click());
-fileInput.addEventListener('change', handleFileSelect);
-// Drag and Drop (Global Window & Zone)
-['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
-window.addEventListener(eventName, (e) => {
-e.preventDefault();
-e.stopPropagation();
-});
-});
-dropZone.addEventListener('dragover', () => dropZone.classList.add('bg-slate-100/50', 'dark:bg-slate-700/30'));
-dropZone.addEventListener('dragleave', () => dropZone.classList.remove('bg-slate-100/50', 'dark:bg-slate-700/30'));
-dropZone.addEventListener('drop', (e) => {
-dropZone.classList.remove('bg-slate-100/50', 'dark:bg-slate-700/30');
-const files = e.dataTransfer.files;
-if (files && files.length > 0) {
-processFiles(files);
-}
-});
-// Batch Actions
-document.getElementById('btn-select-all').addEventListener('click', () => setAllSelected(true));
-document.getElementById('btn-deselect-all').addEventListener('click', () => setAllSelected(false));
-document.getElementById('btn-rotate-selected').addEventListener('click', rotateSelectedPages);
-document.getElementById('btn-delete-selected').addEventListener('click', deleteSelectedPages);
-// OCR Text Recognition
-document.getElementById('btn-auto-detect').addEventListener('click', runAIRecognition);
-setupEnsembleSelector();
-// Spread Splitting
-document.getElementById('btn-split-selected-spread').addEventListener('click', () => splitSpreads(true));
-document.getElementById('btn-split-all-spreads').addEventListener('click', () => splitSpreads(false));
-const spreadPositionInput = document.getElementById('spread-position');
-const spreadPositionLabel = document.getElementById('spread-position-label');
-function setSpreadPosition(value) {
-  spreadPositionPercent = Math.max(20, Math.min(80, Number(value) || 50));
-  spreadPositionInput.value = String(spreadPositionPercent);
-  spreadPositionLabel.textContent = spreadPositionPercent + '%';
-  document.querySelectorAll('.spread-cut-line').forEach(line => {
-    const axis = document.getElementById('spread-axis').value;
-    line.style.left = axis === 'horizontal' ? spreadPositionPercent + '%' : '0';
-    line.style.top = axis === 'vertical' ? spreadPositionPercent + '%' : '0';
-    line.style.width = axis === 'horizontal' ? '28px' : '100%';
-    line.style.height = axis === 'vertical' ? '28px' : '100%';
-    line.style.transform = axis === 'horizontal' ? 'translateX(-50%)' : 'translateY(-50%)';
-    line.style.background = 'transparent';
-    line.style.borderLeft = axis === 'horizontal' ? '3px solid #f43f5e' : 'none';
-    line.style.borderTop = axis === 'vertical' ? '3px solid #f43f5e' : 'none';
-  });
-}
-spreadPositionInput.addEventListener('input', e => setSpreadPosition(e.target.value));
-document.getElementById('spread-axis').addEventListener('change', () => { renderPagesGrid(); });
-document.getElementById('spread-order').addEventListener('change', () => {});
-// Custom Part Category
-document.getElementById('btn-add-custom-part').addEventListener('click', () => {
-const name = prompt('追加するパート名を入力してください (例: Saxophone 2):');
-if (name && !partCategories.includes(name)) {
-partCategories.splice(partCategories.length - 1, 0, name);
-renderPartCategories();
-}
-});
-// Export Buttons
-document.getElementById('btn-export-pdf').addEventListener('click', exportMergedPDF);
-document.getElementById('btn-export-zip').addEventListener('click', exportPartsZIP);
-// Crop Modal Actions
-document.getElementById('btn-close-crop').addEventListener('click', closeCropModal);
-document.getElementById('btn-cancel-crop').addEventListener('click', closeCropModal);
-// Crop selection by pointer; stored in PDF points for lossless export.
-const cropCanvas = document.getElementById('crop-canvas');
-const cropOverlay = document.getElementById('crop-overlay');
-const cropPreviewViewport = document.getElementById('crop-preview-viewport');
-const cropCanvasWrapper = document.getElementById('crop-canvas-wrapper');
-const cropZoomLabel = document.getElementById('crop-zoom-label');
-function applyCropZoom(nextZoom, focalClientX = null, focalClientY = null) {
-  const oldZoom = cropZoom;
-  const rect = cropPreviewViewport.getBoundingClientRect();
-  const focalX = focalClientX === null ? rect.left + rect.width / 2 : focalClientX;
-  const focalY = focalClientY === null ? rect.top + rect.height / 2 : focalClientY;
-  const contentX = cropPreviewViewport.scrollLeft + focalX - rect.left;
-  const contentY = cropPreviewViewport.scrollTop + focalY - rect.top;
-  cropZoom = Math.max(1, Math.min(4, nextZoom));
-  if (cropBaseSize) {
-    const width = cropBaseSize.width * cropZoom;
-    const height = cropBaseSize.height * cropZoom;
-    cropCanvas.style.maxWidth = 'none';
-    cropCanvas.style.maxHeight = 'none';
-    cropCanvas.style.width = `${width}px`;
-    cropCanvas.style.height = `${height}px`;
-    cropCanvasWrapper.style.width = `${width}px`;
-    cropCanvasWrapper.style.height = `${height}px`;
-  }
-  cropZoomLabel.textContent = `${Math.round(cropZoom * 100)}%`;
-  if (oldZoom !== cropZoom) {
-    requestAnimationFrame(() => {
-      cropPreviewViewport.scrollLeft = Math.max(0, contentX * cropZoom / oldZoom - (focalX - rect.left));
-      cropPreviewViewport.scrollTop = Math.max(0, contentY * cropZoom / oldZoom - (focalY - rect.top));
-    });
-  }
-}
-document.getElementById('crop-zoom-in').addEventListener('click', () => applyCropZoom(cropZoom + 0.25));
-document.getElementById('crop-zoom-out').addEventListener('click', () => applyCropZoom(cropZoom - 0.25));
-document.getElementById('crop-zoom-reset').addEventListener('click', () => {
-  applyCropZoom(1);
-  cropPreviewViewport.scrollTo({ left: 0, top: 0, behavior: 'smooth' });
-});
-// Gesture handling: one-finger crop or pan; two-finger pinch zoom around the touched point.
-let cropInteractionMode = 'select';
-let cropGestureMode = null;
-let cropPointerStart = null;
-let cropPanStart = null;
-let cropPinchStartDistance = 0;
-let cropPinchStartZoom = 1;
-let cropPinchAnchorX = 0;
-let cropPinchAnchorY = 0;
-let cropPinchStartMidpoint = null;
 const cropPointers = new Map();
 const cropModeSelectButton = document.getElementById('crop-mode-select');
 const cropModePanButton = document.getElementById('crop-mode-pan');
@@ -541,38 +384,47 @@ function setCropZoomSize(zoom) {
   cropZoomLabel.textContent = `${Math.round(cropZoom * 100)}%`;
 }
 cropPreviewViewport.style.touchAction = 'none';
+function cropCanvasPoint(clientX, clientY) {
+  const rect = cropCanvas.getBoundingClientRect();
+  const scaleX = cropCanvas.width / Math.max(1, rect.width);
+  const scaleY = cropCanvas.height / Math.max(1, rect.height);
+  return {
+    x: Math.max(0, Math.min(cropCanvas.width, (clientX - rect.left) * scaleX)),
+    y: Math.max(0, Math.min(cropCanvas.height, (clientY - rect.top) * scaleY))
+  };
+}
 cropPreviewViewport.addEventListener('pointerdown', e => {
   if (e.target.closest('button')) return;
   if (e.pointerType === 'mouse' && e.button !== 0) return;
-  cropPreviewViewport.setPointerCapture(e.pointerId);
+  try { cropPreviewViewport.setPointerCapture(e.pointerId); } catch (_) {}
   cropPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-  if (cropPointers.size === 2) {
+  if (cropPointers.size >= 2) {
     cropGestureMode = 'pinch';
-    cropDragStart = null;
     cropPointerStart = null;
+    cropDragStart = null;
     cropPanStart = null;
-    activeCropSelection = null;
-    cropOverlay.classList.add('hidden');
     cropPinchStartDistance = Math.max(1, cropDistance());
     cropPinchStartZoom = cropZoom;
-    cropPinchStartMidpoint = cropMidpoint();
-    const rect = cropPreviewViewport.getBoundingClientRect();
-    cropPinchAnchorX = cropPreviewViewport.scrollLeft + cropPinchStartMidpoint.x - rect.left;
-    cropPinchAnchorY = cropPreviewViewport.scrollTop + cropPinchStartMidpoint.y - rect.top;
+    activeCropSelection = null;
+    cropOverlay.classList.add('hidden');
   } else if (cropPointers.size === 1) {
-    if (cropInteractionMode === 'pan' && cropZoom > 1) {
+    if (cropInteractionMode === 'pan' || cropZoom > 1 && e.target !== cropCanvas) {
       cropGestureMode = 'pan';
       cropPanStart = { x: e.clientX, y: e.clientY, left: cropPreviewViewport.scrollLeft, top: cropPreviewViewport.scrollTop };
       cropCanvas.style.cursor = 'grabbing';
     } else if (cropInteractionMode === 'select') {
-      cropGestureMode = 'select';
+      const point = cropCanvasPoint(e.clientX, e.clientY);
       const rect = cropCanvas.getBoundingClientRect();
-      const x = (e.clientX - rect.left) * cropCanvas.width / rect.width;
-      const y = (e.clientY - rect.top) * cropCanvas.height / rect.height;
-      cropPointerStart = { x, y };
-      cropDragStart = { x, y };
-      activeCropSelection = { x, y, width: 1, height: 1 };
-      updateCropOverlay(x, y, 1, 1);
+      if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) {
+        cropGestureMode = 'pan';
+        cropPanStart = { x: e.clientX, y: e.clientY, left: cropPreviewViewport.scrollLeft, top: cropPreviewViewport.scrollTop };
+      } else {
+        cropGestureMode = 'select';
+        cropPointerStart = point;
+        cropDragStart = point;
+        activeCropSelection = { x: point.x, y: point.y, width: 1, height: 1 };
+        updateCropOverlay(point.x, point.y, 1, 1);
+      }
     } else {
       cropGestureMode = 'pan';
       cropPanStart = { x: e.clientX, y: e.clientY, left: cropPreviewViewport.scrollLeft, top: cropPreviewViewport.scrollTop };
@@ -584,36 +436,37 @@ cropPreviewViewport.addEventListener('pointermove', e => {
   if (!cropPointers.has(e.pointerId)) return;
   cropPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
   if (cropPointers.size >= 2 && cropGestureMode === 'pinch') {
-    const midpoint = cropMidpoint();
     const distance = cropDistance();
-    applyCropZoom(cropPinchStartZoom * distance / cropPinchStartDistance, midpoint.x, midpoint.y);
-    const rect = cropPreviewViewport.getBoundingClientRect();
-    cropPreviewViewport.scrollLeft = Math.max(0, cropPinchAnchorX * cropZoom - (midpoint.x - rect.left));
-    cropPreviewViewport.scrollTop = Math.max(0, cropPinchAnchorY * cropZoom - (midpoint.y - rect.top));
+    const midpoint = cropMidpoint();
+    applyCropZoom(cropPinchStartZoom * distance / Math.max(1, cropPinchStartDistance), midpoint.x, midpoint.y);
     e.preventDefault();
     return;
   }
-  if (cropGestureMode === 'pan' && cropPanStart) {
+  if (cropGestureMode === 'pan' && cropPanStart && cropPointers.size === 1) {
     cropPreviewViewport.scrollLeft = cropPanStart.left - (e.clientX - cropPanStart.x);
     cropPreviewViewport.scrollTop = cropPanStart.top - (e.clientY - cropPanStart.y);
     e.preventDefault();
     return;
   }
   if (cropGestureMode === 'select' && cropPointerStart && cropPointers.size === 1) {
-    const rect = cropCanvas.getBoundingClientRect();
-    const x = (e.clientX - rect.left) * cropCanvas.width / rect.width;
-    const y = (e.clientY - rect.top) * cropCanvas.height / rect.height;
-    activeCropSelection = { x: Math.min(cropPointerStart.x, x), y: Math.min(cropPointerStart.y, y),
-      width: Math.abs(x - cropPointerStart.x), height: Math.abs(y - cropPointerStart.y) };
-    updateCropOverlay(cropPointerStart.x, cropPointerStart.y, x - cropPointerStart.x, y - cropPointerStart.y);
+    const point = cropCanvasPoint(e.clientX, e.clientY);
+    activeCropSelection = {
+      x: Math.min(cropPointerStart.x, point.x),
+      y: Math.min(cropPointerStart.y, point.y),
+      width: Math.abs(point.x - cropPointerStart.x),
+      height: Math.abs(point.y - cropPointerStart.y)
+    };
+    updateCropOverlay(cropPointerStart.x, cropPointerStart.y, point.x - cropPointerStart.x, point.y - cropPointerStart.y);
     e.preventDefault();
   }
 });
 function finishCropPointer(e) {
   cropPointers.delete(e.pointerId);
-  if (cropPointers.size < 2) {
-    cropPinchStartDistance = 0;
-    cropPinchStartMidpoint = null;
+  if (cropPointers.size < 2) cropPinchStartDistance = 0;
+  if (cropPointers.size === 1 && cropGestureMode === 'pinch') {
+    const remaining = [...cropPointers.values()][0];
+    cropGestureMode = 'pan';
+    cropPanStart = { x: remaining.x, y: remaining.y, left: cropPreviewViewport.scrollLeft, top: cropPreviewViewport.scrollTop };
   }
   if (cropPointers.size === 0) {
     cropGestureMode = null;
@@ -625,7 +478,9 @@ function finishCropPointer(e) {
 }
 cropPreviewViewport.addEventListener('pointerup', finishCropPointer);
 cropPreviewViewport.addEventListener('pointercancel', finishCropPointer);
-cropPreviewViewport.addEventListener('lostpointercapture', finishCropPointer);
+cropPreviewViewport.addEventListener('lostpointercapture', e => {
+  if (cropPointers.has(e.pointerId)) finishCropPointer(e);
+});
 const updateCropOverlay = (x, y, w, h) => {
 const rect = cropCanvas.getBoundingClientRect();
 const scaleX = rect.width / Math.max(1, cropCanvas.width);
@@ -825,22 +680,32 @@ const updateCutLine = () => {
 };
 updateCutLine();
 let draggingCutLine = false;
-cutLine.addEventListener('pointerdown', e => { draggingCutLine = true; cutLine.setPointerCapture(e.pointerId); e.preventDefault(); e.stopPropagation(); });
+cutLine.style.width = axis === 'horizontal' ? '52px' : '100%';
+cutLine.style.height = axis === 'vertical' ? '52px' : '100%';
+cutLine.style.zIndex = '20';
+cutLine.style.boxSizing = 'border-box';
+cutLine.style.borderLeft = axis === 'horizontal' ? '4px solid #f43f5e' : 'none';
+cutLine.style.borderTop = axis === 'vertical' ? '4px solid #f43f5e' : 'none';
+cutLine.addEventListener('pointerdown', e => {
+  if (e.pointerType === 'mouse' && e.button !== 0) return;
+  draggingCutLine = true;
+  try { cutLine.setPointerCapture(e.pointerId); } catch (_) {}
+  e.preventDefault();
+  e.stopPropagation();
+});
 cutLine.addEventListener('pointermove', e => {
   if (!draggingCutLine) return;
   const rect = thumbBox.getBoundingClientRect();
-  const axis = document.getElementById('spread-axis').value;
-  setSpreadPosition(axis === 'horizontal' ? (e.clientX - rect.left) / rect.width * 100 : (e.clientY - rect.top) / rect.height * 100);
-  document.querySelectorAll('.spread-cut-line').forEach(line => {
-    const a = document.getElementById('spread-axis').value;
-    line.style.left = a === 'horizontal' ? spreadPositionPercent + '%' : '0';
-    line.style.top = a === 'vertical' ? spreadPositionPercent + '%' : '0';
-    line.style.transform = a === 'horizontal' ? 'translateX(-50%)' : 'translateY(-50%)';
-  });
+  const axisNow = document.getElementById('spread-axis').value;
+  const value = axisNow === 'horizontal'
+    ? (e.clientX - rect.left) / Math.max(1, rect.width) * 100
+    : (e.clientY - rect.top) / Math.max(1, rect.height) * 100;
+  setSpreadPosition(value);
 });
 const stopCutDrag = () => { draggingCutLine = false; };
 cutLine.addEventListener('pointerup', stopCutDrag);
 cutLine.addEventListener('pointercancel', stopCutDrag);
+cutLine.addEventListener('lostpointercapture', stopCutDrag);
 thumbBox.appendChild(cutLine);
 // Checkbox Overlay
 const checkBtn = document.createElement('button');
