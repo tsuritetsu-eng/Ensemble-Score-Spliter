@@ -498,6 +498,8 @@ function cropGestureMidpoint() {
   return { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
 }
 let cropPinchStartMidpoint = null;
+let cropPinchAnchorContentX = 0;
+let cropPinchAnchorContentY = 0;
 cropCanvas.addEventListener('pointerdown', e => {
   if (e.pointerType === 'mouse' && e.button !== 0) return;
   cropCanvas.setPointerCapture(e.pointerId);
@@ -516,6 +518,9 @@ cropCanvas.addEventListener('pointerdown', e => {
     cropPinchStartDistance = cropGestureDistance();
     cropPinchStartZoom = cropZoom;
     cropPinchStartMidpoint = cropGestureMidpoint();
+    const viewportRect = cropPreviewViewport.getBoundingClientRect();
+    cropPinchAnchorContentX = cropPreviewViewport.scrollLeft + cropPinchStartMidpoint.x - viewportRect.left;
+    cropPinchAnchorContentY = cropPreviewViewport.scrollTop + cropPinchStartMidpoint.y - viewportRect.top;
   }
   e.preventDefault();
 });
@@ -527,6 +532,11 @@ cropCanvas.addEventListener('pointermove', e => {
     const distance = cropGestureDistance();
     const nextZoom = cropPinchStartZoom * distance / cropPinchStartDistance;
     applyCropZoom(nextZoom, midpoint.x, midpoint.y);
+    const viewportRect = cropPreviewViewport.getBoundingClientRect();
+    requestAnimationFrame(() => {
+      cropPreviewViewport.scrollLeft = Math.max(0, cropPinchAnchorContentX * cropZoom - (midpoint.x - viewportRect.left));
+      cropPreviewViewport.scrollTop = Math.max(0, cropPinchAnchorContentY * cropZoom - (midpoint.y - viewportRect.top));
+    });
     e.preventDefault();
     return;
   }
