@@ -680,12 +680,13 @@ const updateCutLine = () => {
 };
 updateCutLine();
 let draggingCutLine = false;
-cutLine.style.width = axis === 'horizontal' ? '52px' : '100%';
-cutLine.style.height = axis === 'vertical' ? '52px' : '100%';
+const cutAxis = document.getElementById('spread-axis').value;
+cutLine.style.width = cutAxis === 'horizontal' ? '52px' : '100%';
+cutLine.style.height = cutAxis === 'vertical' ? '52px' : '100%';
 cutLine.style.zIndex = '20';
 cutLine.style.boxSizing = 'border-box';
-cutLine.style.borderLeft = axis === 'horizontal' ? '4px solid #f43f5e' : 'none';
-cutLine.style.borderTop = axis === 'vertical' ? '4px solid #f43f5e' : 'none';
+cutLine.style.borderLeft = cutAxis === 'horizontal' ? '4px solid #f43f5e' : 'none';
+cutLine.style.borderTop = cutAxis === 'vertical' ? '4px solid #f43f5e' : 'none';
 cutLine.addEventListener('pointerdown', e => {
   if (e.pointerType === 'mouse' && e.button !== 0) return;
   draggingCutLine = true;
