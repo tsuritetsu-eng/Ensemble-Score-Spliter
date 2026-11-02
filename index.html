@@ -653,15 +653,19 @@ try {
 if (!job.canvas.isConnected) return;
 pdfDoc = await pdfjsLib.getDocument({ data: new Uint8Array(job.pageItem.pdfBuffer.slice(0)) }).promise;
 page = await pdfDoc.getPage(job.pageItem.pageNum);
-const baseViewport = page.getViewport({ scale: 1, rotation: job.pageItem.rotation || 0 });
-const viewport = page.getViewport({ scale: Math.min(0.62, 1400 / Math.max(baseViewport.width, baseViewport.height)), rotation: job.pageItem.rotation || 0 });
-const renderCanvas = document.createElement('canvas');
-renderCanvas.width = Math.ceil(viewport.width);
-renderCanvas.height = Math.ceil(viewport.height);
-const renderCtx = renderCanvas.getContext('2d', { alpha: false });
-if (!renderCtx) throw new Error('プレビュー画像を初期化できません');
-await page.render({ canvasContext: renderCtx, viewport }).promise;
+const rotation = job.pageItem.rotation || 0;
+const baseViewport = page.getViewport({ scale: 1, rotation });
+// Keep the larger on-screen card, but use a moderate bitmap size to avoid exhausting
+// memory on phones when a PDF contains many pages.
+const renderScale = Math.min(0.42, 1000 / Math.max(baseViewport.width, baseViewport.height));
+const viewport = page.getViewport({ scale: renderScale, rotation });
 if (job.pageItem.cropBox) {
+  const renderCanvas = document.createElement('canvas');
+  renderCanvas.width = Math.ceil(viewport.width);
+  renderCanvas.height = Math.ceil(viewport.height);
+  const renderCtx = renderCanvas.getContext('2d', { alpha: false });
+  if (!renderCtx) throw new Error('プレビュー画像を初期化できません');
+  await page.render({ canvasContext: renderCtx, viewport }).promise;
   const b = job.pageItem.cropBox;
   const corners = [
     viewport.convertToViewportPoint(b.x, b.y),
@@ -678,16 +682,28 @@ if (job.pageItem.cropBox) {
   job.canvas.height = Math.max(1, bottom - top);
   const ctx = job.canvas.getContext('2d', { alpha: false });
   ctx.drawImage(renderCanvas, left, top, job.canvas.width, job.canvas.height, 0, 0, job.canvas.width, job.canvas.height);
+  renderCanvas.width = 0;
+  renderCanvas.height = 0;
 } else {
-  job.canvas.width = renderCanvas.width;
-  job.canvas.height = renderCanvas.height;
+  job.canvas.width = Math.ceil(viewport.width);
+  job.canvas.height = Math.ceil(viewport.height);
   const ctx = job.canvas.getContext('2d', { alpha: false });
-  ctx.drawImage(renderCanvas, 0, 0);
+  if (!ctx) throw new Error('プレビュー画像を初期化できません');
+  await page.render({ canvasContext: ctx, viewport }).promise;
 }
-renderCanvas.width = 0;
-renderCanvas.height = 0;
 } catch (err) {
 console.error('Thumbnail render error:', err);
+const card = job.canvas.closest('.group');
+if (card) {
+  const notice = document.createElement('div');
+  notice.className = 'absolute inset-2 flex items-center justify-center text-xs text-red-600 bg-white/90 dark:bg-slate-900/90 rounded';
+  notice.textContent = 'プレビューを表示できません';
+  const box = job.canvas.parentElement;
+  if (box && !box.querySelector('[data-preview-error]')) {
+    notice.dataset.previewError = 'true';
+    box.appendChild(notice);
+  }
+}
 } finally {
 if (page) { try { page.cleanup(); } catch (_) {} }
 if (pdfDoc) { try { await pdfDoc.destroy(); } catch (_) {} }
