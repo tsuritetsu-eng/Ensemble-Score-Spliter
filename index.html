@@ -456,13 +456,7 @@ const cropOverlay = document.getElementById('crop-overlay');
 const cropPreviewViewport = document.getElementById('crop-preview-viewport');
 const cropCanvasWrapper = document.getElementById('crop-canvas-wrapper');
 const cropZoomLabel = document.getElementById('crop-zoom-label');
-function applyCropZoom(nextZoom, focalClientX = null, focalClientY = null) {
-  const oldZoom = cropZoom;
-  const rect = cropPreviewViewport.getBoundingClientRect();
-  const focalX = focalClientX === null ? rect.left + rect.width / 2 : focalClientX;
-  const focalY = focalClientY === null ? rect.top + rect.height / 2 : focalClientY;
-  const anchorX = (cropPreviewViewport.scrollLeft + focalX - rect.left) / oldZoom;
-  const anchorY = (cropPreviewViewport.scrollTop + focalY - rect.top) / oldZoom;
+function applyCropZoom(nextZoom) {
   cropZoom = Math.max(1, Math.min(4, nextZoom));
   if (cropBaseSize) {
     const width = cropBaseSize.width * cropZoom;
@@ -475,10 +469,6 @@ function applyCropZoom(nextZoom, focalClientX = null, focalClientY = null) {
     cropCanvasWrapper.style.height = `${height}px`;
   }
   cropZoomLabel.textContent = `${Math.round(cropZoom * 100)}%`;
-  requestAnimationFrame(() => {
-    cropPreviewViewport.scrollLeft = Math.max(0, anchorX * cropZoom - (focalX - rect.left));
-    cropPreviewViewport.scrollTop = Math.max(0, anchorY * cropZoom - (focalY - rect.top));
-  });
 }
 document.getElementById('crop-zoom-in').addEventListener('click', () => applyCropZoom(cropZoom + 0.25));
 document.getElementById('crop-zoom-out').addEventListener('click', () => applyCropZoom(cropZoom - 0.25));
@@ -521,7 +511,7 @@ cropPreviewViewport.addEventListener('touchstart', e => {
     const a = e.touches[0], b = e.touches[1];
     cropPinchStartDistance = Math.max(1, Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY));
     cropPinchStartZoom = cropZoom;
-    const rect = cropPreviewViewport.getBoundingClientRect();
+    const rect = cropCanvasWrapper.getBoundingClientRect();
     cropPinchAnchor = {
       x: (cropPreviewViewport.scrollLeft + (a.clientX + b.clientX) / 2 - rect.left) / cropZoom,
       y: (cropPreviewViewport.scrollTop + (a.clientY + b.clientY) / 2 - rect.top) / cropZoom
@@ -543,12 +533,26 @@ cropPreviewViewport.addEventListener('touchmove', e => {
   const midpointX = (a.clientX + b.clientX) / 2;
   const midpointY = (a.clientY + b.clientY) / 2;
   const nextZoom = Math.max(1, Math.min(4, cropPinchStartZoom * distance / cropPinchStartDistance));
+  const oldWrapperRect = cropCanvasWrapper.getBoundingClientRect();
+  const oldScrollLeft = cropPreviewViewport.scrollLeft;
+  const oldScrollTop = cropPreviewViewport.scrollTop;
   applyCropZoom(nextZoom);
-  const rect = cropPreviewViewport.getBoundingClientRect();
-  if (cropPinchAnchor) {
-    cropPreviewViewport.scrollLeft = Math.max(0, cropPinchAnchor.x * cropZoom - (midpointX - rect.left));
-    cropPreviewViewport.scrollTop = Math.max(0, cropPinchAnchor.y * cropZoom - (midpointY - rect.top));
-  }
+  // サイズ変更後のwrapper位置を待ってから、ピンチ中心が同じ画像位置を指すようスクロールを補正する。
+  requestAnimationFrame(() => {
+    if (!cropIsPinching || !cropPinchAnchor) return;
+    const viewportRect = cropPreviewViewport.getBoundingClientRect();
+    const newWrapperRect = cropCanvasWrapper.getBoundingClientRect();
+    cropPreviewViewport.scrollLeft = Math.max(0,
+      oldScrollLeft + (newWrapperRect.left - oldWrapperRect.left) +
+      cropPinchAnchor.x * (cropZoom - cropPinchStartZoom) -
+      (midpointX - (viewportRect.left + cropPreviewViewport.clientLeft))
+    );
+    cropPreviewViewport.scrollTop = Math.max(0,
+      oldScrollTop + (newWrapperRect.top - oldWrapperRect.top) +
+      cropPinchAnchor.y * (cropZoom - cropPinchStartZoom) -
+      (midpointY - (viewportRect.top + cropPreviewViewport.clientTop))
+    );
+  });
   e.preventDefault();
 }, { passive: false });
 const finishCropPinch = e => {
