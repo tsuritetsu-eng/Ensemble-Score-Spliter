@@ -281,11 +281,17 @@ A3横長などの見開き譜面を真ん中で独立した2枚のページ（A4
 </button>
 </div>
 <div id="crop-preview-viewport" class="flex-1 min-h-[100px] min-w-0 p-1.5 sm:p-4 overflow-auto flex items-center justify-center bg-slate-900 relative overscroll-contain">
-<div class="absolute top-2 right-2 z-10 flex items-center gap-1 rounded-lg bg-slate-800/90 p-1 shadow-lg">
+<div class="absolute top-2 left-2 right-2 z-10 flex flex-wrap items-center justify-between gap-2 pointer-events-none">
+<div class="flex items-center gap-1 rounded-lg bg-slate-800/90 p-1 shadow-lg pointer-events-auto">
+<button id="crop-mode-select" type="button" class="px-3 h-9 rounded-md text-xs font-bold text-white bg-sky-700">範囲選択</button>
+<button id="crop-mode-pan" type="button" class="px-3 h-9 rounded-md text-xs font-bold text-white hover:bg-slate-700">画像移動</button>
+</div>
+<div class="flex items-center gap-1 rounded-lg bg-slate-800/90 p-1 shadow-lg pointer-events-auto">
 <button id="crop-zoom-out" type="button" aria-label="縮小" class="w-9 h-9 rounded-md text-white text-xl font-bold hover:bg-slate-700">−</button>
 <span id="crop-zoom-label" class="min-w-[3.5rem] text-center text-xs text-white tabular-nums">100%</span>
 <button id="crop-zoom-in" type="button" aria-label="拡大" class="w-9 h-9 rounded-md text-white text-xl font-bold hover:bg-slate-700">＋</button>
 <button id="crop-zoom-reset" type="button" class="px-2 h-9 rounded-md text-xs text-white hover:bg-slate-700">リセット</button>
+</div>
 </div>
 <div id="crop-canvas-wrapper" class="relative inline-block border border-slate-700 shadow-lg shrink-0">
 <canvas id="crop-canvas" class="block max-w-full max-h-[30dvh] sm:max-h-[58vh] touch-none cursor-crosshair"></canvas>
@@ -481,85 +487,141 @@ function applyCropZoom(nextZoom, focalClientX = null, focalClientY = null) {
     });
   }
 }
-document.getElementById('crop-zoom-in').addEventListener('click', () => applyCropZoom(cropZoom + 0.25));
-document.getElementById('crop-zoom-out').addEventListener('click', () => applyCropZoom(cropZoom - 0.25));
+document.getElementById('crop-zoom-in').addEventListener('click', () => setCropZoomSize(cropZoom + 0.25));
+document.getElementById('crop-zoom-out').addEventListener('click', () => setCropZoomSize(cropZoom - 0.25));
 document.getElementById('crop-zoom-reset').addEventListener('click', () => {
-  applyCropZoom(1, cropPreviewViewport.getBoundingClientRect().left + cropPreviewViewport.clientWidth / 2,
-    cropPreviewViewport.getBoundingClientRect().top + cropPreviewViewport.clientHeight / 2);
+  setCropZoomSize(1);
   cropPreviewViewport.scrollTo({ left: 0, top: 0, behavior: 'smooth' });
 });
-// Pointer gestures: one finger draws a crop; two fingers zoom around their midpoint and pan.
-function cropGestureDistance() {
-  const pts = [...cropTouchPoints.values()];
-  return Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
-}
-function cropGestureMidpoint() {
-  const pts = [...cropTouchPoints.values()];
-  return { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
-}
+// Gesture handling: one-finger crop or pan; two-finger pinch zoom around the touched point.
+let cropInteractionMode = 'select';
+let cropGestureMode = null;
+let cropPointerStart = null;
+let cropPanStart = null;
+let cropPinchStartDistance = 0;
+let cropPinchStartZoom = 1;
+let cropPinchAnchorX = 0;
+let cropPinchAnchorY = 0;
 let cropPinchStartMidpoint = null;
-let cropPinchAnchorContentX = 0;
-let cropPinchAnchorContentY = 0;
-cropCanvas.addEventListener('pointerdown', e => {
+const cropPointers = new Map();
+const cropModeSelectButton = document.getElementById('crop-mode-select');
+const cropModePanButton = document.getElementById('crop-mode-pan');
+function setCropInteractionMode(mode) {
+  cropInteractionMode = mode;
+  cropModeSelectButton.classList.toggle('bg-sky-700', mode === 'select');
+  cropModePanButton.classList.toggle('bg-sky-700', mode === 'pan');
+  cropCanvas.style.cursor = mode === 'select' ? 'crosshair' : 'grab';
+}
+cropModeSelectButton.addEventListener('click', () => setCropInteractionMode('select'));
+cropModePanButton.addEventListener('click', () => setCropInteractionMode('pan'));
+function cropMidpoint() {
+  const points = [...cropPointers.values()];
+  return { x: (points[0].x + points[1].x) / 2, y: (points[0].y + points[1].y) / 2 };
+}
+function cropDistance() {
+  const points = [...cropPointers.values()];
+  return Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y);
+}
+function setCropZoomSize(zoom) {
+  cropZoom = Math.max(1, Math.min(4, zoom));
+  if (cropBaseSize) {
+    const width = cropBaseSize.width * cropZoom;
+    const height = cropBaseSize.height * cropZoom;
+    cropCanvas.style.maxWidth = 'none';
+    cropCanvas.style.maxHeight = 'none';
+    cropCanvas.style.width = `${width}px`;
+    cropCanvas.style.height = `${height}px`;
+    cropCanvasWrapper.style.width = `${width}px`;
+    cropCanvasWrapper.style.height = `${height}px`;
+  }
+  cropZoomLabel.textContent = `${Math.round(cropZoom * 100)}%`;
+}
+cropPreviewViewport.style.touchAction = 'none';
+cropPreviewViewport.addEventListener('pointerdown', e => {
+  if (e.target.closest('button')) return;
   if (e.pointerType === 'mouse' && e.button !== 0) return;
-  cropCanvas.setPointerCapture(e.pointerId);
-  cropTouchPoints.set(e.pointerId, { x: e.clientX, y: e.clientY });
-  if (cropTouchPoints.size === 1) {
-    const rect = cropCanvas.getBoundingClientRect();
-    const x = (e.clientX - rect.left) * cropCanvas.width / rect.width;
-    const y = (e.clientY - rect.top) * cropCanvas.height / rect.height;
-    cropDragStart = { x, y };
-    activeCropSelection = { x, y, width: 1, height: 1 };
-    updateCropOverlay(x, y, 1, 1);
-  } else if (cropTouchPoints.size === 2) {
+  cropPreviewViewport.setPointerCapture(e.pointerId);
+  cropPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (cropPointers.size === 2) {
+    cropGestureMode = 'pinch';
     cropDragStart = null;
+    cropPointerStart = null;
+    cropPanStart = null;
     activeCropSelection = null;
     cropOverlay.classList.add('hidden');
-    cropPinchStartDistance = cropGestureDistance();
+    cropPinchStartDistance = Math.max(1, cropDistance());
     cropPinchStartZoom = cropZoom;
-    cropPinchStartMidpoint = cropGestureMidpoint();
-    const viewportRect = cropPreviewViewport.getBoundingClientRect();
-    cropPinchAnchorContentX = cropPreviewViewport.scrollLeft + cropPinchStartMidpoint.x - viewportRect.left;
-    cropPinchAnchorContentY = cropPreviewViewport.scrollTop + cropPinchStartMidpoint.y - viewportRect.top;
+    cropPinchStartMidpoint = cropMidpoint();
+    const rect = cropPreviewViewport.getBoundingClientRect();
+    cropPinchAnchorX = cropPreviewViewport.scrollLeft + cropPinchStartMidpoint.x - rect.left;
+    cropPinchAnchorY = cropPreviewViewport.scrollTop + cropPinchStartMidpoint.y - rect.top;
+  } else if (cropPointers.size === 1) {
+    if (cropInteractionMode === 'pan' && cropZoom > 1) {
+      cropGestureMode = 'pan';
+      cropPanStart = { x: e.clientX, y: e.clientY, left: cropPreviewViewport.scrollLeft, top: cropPreviewViewport.scrollTop };
+      cropCanvas.style.cursor = 'grabbing';
+    } else if (cropInteractionMode === 'select') {
+      cropGestureMode = 'select';
+      const rect = cropCanvas.getBoundingClientRect();
+      const x = (e.clientX - rect.left) * cropCanvas.width / rect.width;
+      const y = (e.clientY - rect.top) * cropCanvas.height / rect.height;
+      cropPointerStart = { x, y };
+      cropDragStart = { x, y };
+      activeCropSelection = { x, y, width: 1, height: 1 };
+      updateCropOverlay(x, y, 1, 1);
+    } else {
+      cropGestureMode = 'pan';
+      cropPanStart = { x: e.clientX, y: e.clientY, left: cropPreviewViewport.scrollLeft, top: cropPreviewViewport.scrollTop };
+    }
   }
   e.preventDefault();
 });
-cropCanvas.addEventListener('pointermove', e => {
-  if (!cropTouchPoints.has(e.pointerId)) return;
-  cropTouchPoints.set(e.pointerId, { x: e.clientX, y: e.clientY });
-  if (cropTouchPoints.size >= 2 && cropPinchStartDistance > 0) {
-    const midpoint = cropGestureMidpoint();
-    const distance = cropGestureDistance();
-    const nextZoom = cropPinchStartZoom * distance / cropPinchStartDistance;
-    applyCropZoom(nextZoom, midpoint.x, midpoint.y);
-    const viewportRect = cropPreviewViewport.getBoundingClientRect();
-    requestAnimationFrame(() => {
-      cropPreviewViewport.scrollLeft = Math.max(0, cropPinchAnchorContentX * cropZoom - (midpoint.x - viewportRect.left));
-      cropPreviewViewport.scrollTop = Math.max(0, cropPinchAnchorContentY * cropZoom - (midpoint.y - viewportRect.top));
-    });
+cropPreviewViewport.addEventListener('pointermove', e => {
+  if (!cropPointers.has(e.pointerId)) return;
+  cropPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (cropPointers.size >= 2 && cropGestureMode === 'pinch') {
+    const midpoint = cropMidpoint();
+    const distance = cropDistance();
+    setCropZoomSize(cropPinchStartZoom * distance / cropPinchStartDistance);
+    const rect = cropPreviewViewport.getBoundingClientRect();
+    cropPreviewViewport.scrollLeft = Math.max(0, cropPinchAnchorX * cropZoom - (midpoint.x - rect.left));
+    cropPreviewViewport.scrollTop = Math.max(0, cropPinchAnchorY * cropZoom - (midpoint.y - rect.top));
     e.preventDefault();
     return;
   }
-  if (!cropDragStart) return;
-  const rect = cropCanvas.getBoundingClientRect();
-  const x = (e.clientX - rect.left) * cropCanvas.width / rect.width;
-  const y = (e.clientY - rect.top) * cropCanvas.height / rect.height;
-  activeCropSelection = { x: Math.min(cropDragStart.x, x), y: Math.min(cropDragStart.y, y),
-    width: Math.abs(x - cropDragStart.x), height: Math.abs(y - cropDragStart.y) };
-  updateCropOverlay(cropDragStart.x, cropDragStart.y, x - cropDragStart.x, y - cropDragStart.y);
-  e.preventDefault();
+  if (cropGestureMode === 'pan' && cropPanStart) {
+    cropPreviewViewport.scrollLeft = cropPanStart.left - (e.clientX - cropPanStart.x);
+    cropPreviewViewport.scrollTop = cropPanStart.top - (e.clientY - cropPanStart.y);
+    e.preventDefault();
+    return;
+  }
+  if (cropGestureMode === 'select' && cropPointerStart && cropPointers.size === 1) {
+    const rect = cropCanvas.getBoundingClientRect();
+    const x = (e.clientX - rect.left) * cropCanvas.width / rect.width;
+    const y = (e.clientY - rect.top) * cropCanvas.height / rect.height;
+    activeCropSelection = { x: Math.min(cropPointerStart.x, x), y: Math.min(cropPointerStart.y, y),
+      width: Math.abs(x - cropPointerStart.x), height: Math.abs(y - cropPointerStart.y) };
+    updateCropOverlay(cropPointerStart.x, cropPointerStart.y, x - cropPointerStart.x, y - cropPointerStart.y);
+    e.preventDefault();
+  }
 });
 function finishCropPointer(e) {
-  cropTouchPoints.delete(e.pointerId);
-  if (cropTouchPoints.size < 2) {
+  cropPointers.delete(e.pointerId);
+  if (cropPointers.size < 2) {
     cropPinchStartDistance = 0;
     cropPinchStartMidpoint = null;
   }
-  cropDragStart = null;
+  if (cropPointers.size === 0) {
+    cropGestureMode = null;
+    cropPointerStart = null;
+    cropDragStart = null;
+    cropPanStart = null;
+    cropCanvas.style.cursor = cropInteractionMode === 'select' ? 'crosshair' : 'grab';
+  }
 }
-cropCanvas.addEventListener('pointerup', finishCropPointer);
-cropCanvas.addEventListener('pointercancel', finishCropPointer);
-cropCanvas.addEventListener('lostpointercapture', finishCropPointer);
+cropPreviewViewport.addEventListener('pointerup', finishCropPointer);
+cropPreviewViewport.addEventListener('pointercancel', finishCropPointer);
+cropPreviewViewport.addEventListener('lostpointercapture', finishCropPointer);
 const updateCropOverlay = (x, y, w, h) => {
 const rect = cropCanvas.getBoundingClientRect();
 const scaleX = rect.width / Math.max(1, cropCanvas.width);
