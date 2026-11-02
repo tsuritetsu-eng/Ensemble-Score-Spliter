@@ -511,6 +511,10 @@ if (target === 'selected' && targets.length === 0) {
   showToast('適用先のページを一覧で選択してください', 'error'); return;
 }
 if (!targets.some(page => page.id === source.id) && target === 'current') targets = [source];
+const alreadyCropped = targets.filter(page => page.cropBox).length;
+if (alreadyCropped > 0 && !window.confirm(`${alreadyCropped}ページには既に切り抜き範囲が設定されています。同じ割合の範囲で上書きしますか？`)) {
+  return;
+}
 targets.forEach(item => {
   const width = Number(item.width) || source.width;
   const height = Number(item.height) || source.height;
