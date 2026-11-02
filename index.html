@@ -280,9 +280,15 @@ A3横長などの見開き譜面を真ん中で独立した2枚のページ（A4
 <i data-lucide="x" class="w-5 h-5"></i>
 </button>
 </div>
-<div class="flex-1 min-h-[100px] min-w-0 p-1.5 sm:p-4 overflow-auto flex items-center justify-center bg-slate-900 relative">
-<div id="crop-canvas-wrapper" class="relative inline-block max-w-full border border-slate-700 shadow-lg">
-<canvas id="crop-canvas" class="block max-w-full max-h-[30dvh] sm:max-h-[58vh] touch-none cursor-crosshair">
+<div id="crop-preview-viewport" class="flex-1 min-h-[100px] min-w-0 p-1.5 sm:p-4 overflow-auto flex items-center justify-center bg-slate-900 relative overscroll-contain">
+<div class="absolute top-2 right-2 z-10 flex items-center gap-1 rounded-lg bg-slate-800/90 p-1 shadow-lg">
+<button id="crop-zoom-out" type="button" aria-label="縮小" class="w-9 h-9 rounded-md text-white text-xl font-bold hover:bg-slate-700">−</button>
+<span id="crop-zoom-label" class="min-w-[3.5rem] text-center text-xs text-white tabular-nums">100%</span>
+<button id="crop-zoom-in" type="button" aria-label="拡大" class="w-9 h-9 rounded-md text-white text-xl font-bold hover:bg-slate-700">＋</button>
+<button id="crop-zoom-reset" type="button" class="px-2 h-9 rounded-md text-xs text-white hover:bg-slate-700">リセット</button>
+</div>
+<div id="crop-canvas-wrapper" class="relative inline-block border border-slate-700 shadow-lg shrink-0">
+<canvas id="crop-canvas" class="block touch-none cursor-crosshair">
 <div id="crop-overlay" class="absolute border-2 border-brand-500 bg-brand-500/20 cursor-move hidden">
 <div class="absolute -top-1.5 -left-1.5 w-3 h-3 bg-white border border-brand-500"></div>
 <div class="absolute -top-1.5 -right-1.5 w-3 h-3 bg-white border border-brand-500"></div>
@@ -333,6 +339,11 @@ let draggedPageIndex = null;
 let activeCropPageIndex = null;
 let activeCropSelection = null;
 let cropDragStart = null;
+let cropZoom = 1;
+let cropBaseSize = null;
+let cropTouchPoints = new Map();
+let cropPinchStartDistance = 0;
+let cropPinchStartZoom = 1;
 let activeThumbnailRenders = 0;
 const thumbnailQueue = [];
 const MAX_THUMBNAIL_RENDERS = 2;
@@ -441,6 +452,49 @@ document.getElementById('btn-cancel-crop').addEventListener('click', closeCropMo
 // Crop selection by pointer; stored in PDF points for lossless export.
 const cropCanvas = document.getElementById('crop-canvas');
 const cropOverlay = document.getElementById('crop-overlay');
+const cropPreviewViewport = document.getElementById('crop-preview-viewport');
+const cropCanvasWrapper = document.getElementById('crop-canvas-wrapper');
+const cropZoomLabel = document.getElementById('crop-zoom-label');
+function applyCropZoom(nextZoom) {
+  cropZoom = Math.max(1, Math.min(4, nextZoom));
+  if (cropBaseSize) {
+    cropCanvas.style.maxWidth = 'none';
+    cropCanvas.style.maxHeight = 'none';
+    cropCanvas.style.width = `${cropBaseSize.width * cropZoom}px`;
+    cropCanvas.style.height = `${cropBaseSize.height * cropZoom}px`;
+    cropCanvasWrapper.style.width = `${cropBaseSize.width * cropZoom}px`;
+    cropCanvasWrapper.style.height = `${cropBaseSize.height * cropZoom}px`;
+  }
+  cropZoomLabel.textContent = `${Math.round(cropZoom * 100)}%`;
+}
+document.getElementById('crop-zoom-in').addEventListener('click', () => applyCropZoom(cropZoom + 0.25));
+document.getElementById('crop-zoom-out').addEventListener('click', () => applyCropZoom(cropZoom - 0.25));
+document.getElementById('crop-zoom-reset').addEventListener('click', () => {
+  applyCropZoom(1);
+  cropPreviewViewport.scrollTo({ left: 0, top: 0, behavior: 'smooth' });
+});
+// Two-finger pinch zoom. A single finger remains dedicated to crop selection.
+cropPreviewViewport.addEventListener('touchstart', e => {
+  if (e.touches.length === 2) {
+    cropDragStart = null;
+    const a = e.touches[0], b = e.touches[1];
+    cropPinchStartDistance = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+    cropPinchStartZoom = cropZoom;
+    e.preventDefault();
+  }
+}, { passive: false });
+cropPreviewViewport.addEventListener('touchmove', e => {
+  if (e.touches.length !== 2 || !cropPinchStartDistance) return;
+  const a = e.touches[0], b = e.touches[1];
+  const distance = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+  applyCropZoom(cropPinchStartZoom * distance / cropPinchStartDistance);
+  e.preventDefault();
+}, { passive: false });
+const finishCropPinch = e => {
+  if (e.touches.length < 2) cropPinchStartDistance = 0;
+};
+cropPreviewViewport.addEventListener('touchend', finishCropPinch);
+cropPreviewViewport.addEventListener('touchcancel', finishCropPinch);
 const updateCropOverlay = (x, y, w, h) => {
 const rect = cropCanvas.getBoundingClientRect();
 const scaleX = rect.width / Math.max(1, cropCanvas.width);
@@ -1555,6 +1609,16 @@ const overlay = document.getElementById('crop-overlay');
 overlay.classList.add('hidden');
 activeCropSelection = null;
 cropDragStart = null;
+cropZoom = 1;
+cropBaseSize = { width: canvas.getBoundingClientRect().width, height: canvas.getBoundingClientRect().height };
+canvas.style.width = '';
+canvas.style.height = '';
+canvas.style.maxWidth = '';
+canvas.style.maxHeight = '';
+cropCanvasWrapper.style.width = `${cropBaseSize.width}px`;
+cropCanvasWrapper.style.height = `${cropBaseSize.height}px`;
+applyCropZoom(1);
+cropPreviewViewport.scrollTo({ left: 0, top: 0 });
 } catch (err) {
 console.error('Crop preview error:', err);
 showToast('トリミング画面を表示できませんでした', 'error');
