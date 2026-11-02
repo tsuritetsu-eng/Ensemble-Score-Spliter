@@ -467,6 +467,9 @@ function applyCropZoom(nextZoom) {
     cropCanvas.style.height = `${height}px`;
     cropCanvasWrapper.style.width = `${width}px`;
     cropCanvasWrapper.style.height = `${height}px`;
+    // Keep the image centered at 100%; allow scrolling from the top-left after zooming.
+    cropPreviewViewport.style.alignItems = cropZoom > 1 ? 'flex-start' : 'center';
+    cropCanvasWrapper.style.margin = cropZoom > 1 ? '0' : 'auto';
   }
   cropZoomLabel.textContent = `${Math.round(cropZoom * 100)}%`;
 }
@@ -1759,48 +1762,73 @@ const canvas = document.getElementById('crop-canvas');
 let pdfDoc = null;
 let page = null;
 try {
-pdfDoc = await pdfjsLib.getDocument({ data: new Uint8Array(pageItem.pdfBuffer.slice(0)) }).promise;
-page = await pdfDoc.getPage(pageItem.pageNum);
-const baseViewport = page.getViewport({ scale: 1 });
-const baseArea = baseViewport.width * baseViewport.height;
-// Crop editor only: render a sharper source bitmap than the list thumbnails.
-// Cap both the longest edge and total pixels to keep iPhone memory usage bounded.
-const cropRenderScale = Math.min(
-  1.8,
-  3200 / Math.max(baseViewport.width, baseViewport.height),
-  Math.sqrt(12000000 / Math.max(1, baseArea))
-);
-const viewport = page.getViewport({ scale: Math.max(1, cropRenderScale) });
-canvas.width = Math.ceil(viewport.width);
-canvas.height = Math.ceil(viewport.height);
-const ctx = canvas.getContext('2d', { alpha: false });
-await page.render({ canvasContext: ctx, viewport }).promise;
-const overlay = document.getElementById('crop-overlay');
-overlay.classList.add('hidden');
-activeCropSelection = null;
-cropDragStart = null;
-cropIsPinching = false;
-cropPinchStartDistance = 0;
-cropPanPointer = null;
-cropInteractionMode = 'select';
-cropModeSelectButton.classList.add('bg-sky-700');
-cropModePanButton.classList.remove('bg-sky-700');
-cropZoom = 1;
-cropBaseSize = { width: canvas.getBoundingClientRect().width, height: canvas.getBoundingClientRect().height };
-canvas.style.width = '';
-canvas.style.height = '';
-canvas.style.maxWidth = '';
-canvas.style.maxHeight = '';
-cropCanvasWrapper.style.width = `${cropBaseSize.width}px`;
-cropCanvasWrapper.style.height = `${cropBaseSize.height}px`;
-applyCropZoom(1);
-cropPreviewViewport.scrollTo({ left: 0, top: 0 });
+  pdfDoc = await pdfjsLib.getDocument({ data: new Uint8Array(pageItem.pdfBuffer.slice(0)) }).promise;
+  page = await pdfDoc.getPage(pageItem.pageNum);
+  const baseViewport = page.getViewport({ scale: 1 });
+  const area = Math.max(1, baseViewport.width * baseViewport.height);
+  // Keep the source bitmap detailed while staying below mobile canvas/memory limits.
+  let renderScale = Math.min(
+    1.5,
+    2600 / Math.max(baseViewport.width, baseViewport.height),
+    Math.sqrt(8000000 / area)
+  );
+  renderScale = Math.max(0.35, renderScale);
+  let rendered = false;
+  let lastRenderError = null;
+  for (let attempt = 0; attempt < 3 && !rendered; attempt++) {
+    const viewport = page.getViewport({ scale: renderScale });
+    canvas.width = Math.max(1, Math.ceil(viewport.width));
+    canvas.height = Math.max(1, Math.ceil(viewport.height));
+    const ctx = canvas.getContext('2d', { alpha: false });
+    if (!ctx) throw new Error('Canvas context unavailable');
+    try {
+      await page.render({ canvasContext: ctx, viewport }).promise;
+      rendered = true;
+    } catch (err) {
+      lastRenderError = err;
+      canvas.width = 0;
+      canvas.height = 0;
+      renderScale *= 0.65;
+    }
+  }
+  if (!rendered) throw lastRenderError || new Error('PDF preview render failed');
+
+  const overlay = document.getElementById('crop-overlay');
+  overlay.classList.add('hidden');
+  activeCropSelection = null;
+  cropDragStart = null;
+  cropIsPinching = false;
+  cropPinchStartDistance = 0;
+  cropPinchAnchor = null;
+  cropPanPointer = null;
+  cropPanTouch = null;
+  cropInteractionMode = 'select';
+  cropModeSelectButton.classList.add('bg-sky-700');
+  cropModePanButton.classList.remove('bg-sky-700');
+
+  // Fit the high-resolution bitmap into the visible preview area at 100%.
+  // Zoom changes its CSS display size, not the source bitmap dimensions.
+  const availableWidth = Math.max(160, cropPreviewViewport.clientWidth - 32);
+  const availableHeight = Math.max(160, cropPreviewViewport.clientHeight - 32);
+  const fitScale = Math.min(1, availableWidth / canvas.width, availableHeight / canvas.height);
+  cropBaseSize = {
+    width: Math.max(1, canvas.width * fitScale),
+    height: Math.max(1, canvas.height * fitScale)
+  };
+  cropZoom = 1;
+  cropCanvas.style.maxWidth = 'none';
+  cropCanvas.style.maxHeight = 'none';
+  cropCanvasWrapper.style.margin = 'auto';
+  cropPreviewViewport.style.alignItems = 'center';
+  applyCropZoom(1);
+  cropZoomLabel.textContent = '100%';
+  cropPreviewViewport.scrollTo({ left: 0, top: 0 });
 } catch (err) {
-console.error('Crop preview error:', err);
-showToast('トリミング画面を表示できませんでした', 'error');
+  console.error('Crop preview error:', err);
+  showToast('PDFの表示に失敗しました。ページサイズを下げて再試行してください', 'error');
 } finally {
-if (page) { try { page.cleanup(); } catch (_) {} }
-if (pdfDoc) { try { await pdfDoc.destroy(); } catch (_) {} }
+  if (page) { try { page.cleanup(); } catch (_) {} }
+  if (pdfDoc) { try { await pdfDoc.destroy(); } catch (_) {} }
 }
 }
 function closeCropModal() {
