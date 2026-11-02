@@ -543,14 +543,12 @@ cropPreviewViewport.addEventListener('touchmove', e => {
     const viewportRect = cropPreviewViewport.getBoundingClientRect();
     const newWrapperRect = cropCanvasWrapper.getBoundingClientRect();
     cropPreviewViewport.scrollLeft = Math.max(0,
-      oldScrollLeft + (newWrapperRect.left - oldWrapperRect.left) +
-      cropPinchAnchor.x * (cropZoom - cropPinchStartZoom) -
-      (midpointX - (viewportRect.left + cropPreviewViewport.clientLeft))
+      newWrapperRect.left + cropPinchAnchor.x * cropZoom -
+      (viewportRect.left + cropPreviewViewport.clientLeft)
     );
     cropPreviewViewport.scrollTop = Math.max(0,
-      oldScrollTop + (newWrapperRect.top - oldWrapperRect.top) +
-      cropPinchAnchor.y * (cropZoom - cropPinchStartZoom) -
-      (midpointY - (viewportRect.top + cropPreviewViewport.clientTop))
+      newWrapperRect.top + cropPinchAnchor.y * cropZoom -
+      (viewportRect.top + cropPreviewViewport.clientTop)
     );
   });
   e.preventDefault();
