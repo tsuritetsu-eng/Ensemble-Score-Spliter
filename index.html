@@ -434,8 +434,12 @@ function setSpreadPosition(value) {
     const axis = document.getElementById('spread-axis').value;
     line.style.left = axis === 'horizontal' ? spreadPositionPercent + '%' : '0';
     line.style.top = axis === 'vertical' ? spreadPositionPercent + '%' : '0';
-    line.style.width = axis === 'horizontal' ? '2px' : '100%';
-    line.style.height = axis === 'vertical' ? '2px' : '100%';
+    line.style.width = axis === 'horizontal' ? '28px' : '100%';
+    line.style.height = axis === 'vertical' ? '28px' : '100%';
+    line.style.transform = axis === 'horizontal' ? 'translateX(-50%)' : 'translateY(-50%)';
+    line.style.background = 'transparent';
+    line.style.borderLeft = axis === 'horizontal' ? '3px solid #f43f5e' : 'none';
+    line.style.borderTop = axis === 'vertical' ? '3px solid #f43f5e' : 'none';
   });
 }
 spreadPositionInput.addEventListener('input', e => setSpreadPosition(e.target.value));
@@ -804,15 +808,20 @@ canvas.style.transform = `rotate(${pageItem.rotation}deg)`;
 thumbBox.appendChild(canvas);
 // Draggable split guide (preview only; shared split position)
 const cutLine = document.createElement('div');
-cutLine.className = 'spread-cut-line absolute z-[5] bg-rose-500 shadow-[0_0_0_1px_rgba(255,255,255,.8)]';
+cutLine.className = 'spread-cut-line absolute z-[5] touch-none';
 cutLine.style.pointerEvents = 'auto';
 const updateCutLine = () => {
   const axis = document.getElementById('spread-axis').value;
   cutLine.style.left = axis === 'horizontal' ? spreadPositionPercent + '%' : '0';
   cutLine.style.top = axis === 'vertical' ? spreadPositionPercent + '%' : '0';
-  cutLine.style.width = axis === 'horizontal' ? '2px' : '100%';
-  cutLine.style.height = axis === 'vertical' ? '2px' : '100%';
+  cutLine.style.width = axis === 'horizontal' ? '28px' : '100%';
+  cutLine.style.height = axis === 'vertical' ? '28px' : '100%';
+  cutLine.style.transform = axis === 'horizontal' ? 'translateX(-50%)' : 'translateY(-50%)';
+  cutLine.style.background = 'transparent';
+  cutLine.style.borderLeft = axis === 'horizontal' ? '3px solid #f43f5e' : 'none';
+  cutLine.style.borderTop = axis === 'vertical' ? '3px solid #f43f5e' : 'none';
   cutLine.style.cursor = axis === 'horizontal' ? 'ew-resize' : 'ns-resize';
+  cutLine.style.touchAction = 'none';
 };
 updateCutLine();
 let draggingCutLine = false;
@@ -826,6 +835,7 @@ cutLine.addEventListener('pointermove', e => {
     const a = document.getElementById('spread-axis').value;
     line.style.left = a === 'horizontal' ? spreadPositionPercent + '%' : '0';
     line.style.top = a === 'vertical' ? spreadPositionPercent + '%' : '0';
+    line.style.transform = a === 'horizontal' ? 'translateX(-50%)' : 'translateY(-50%)';
   });
 });
 const stopCutDrag = () => { draggingCutLine = false; };
