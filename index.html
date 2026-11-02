@@ -499,8 +499,22 @@ function setCropInteractionMode(mode) {
 cropModeSelectButton.addEventListener('click', () => setCropInteractionMode('select'));
 cropModePanButton.addEventListener('click', () => setCropInteractionMode('pan'));
 cropPreviewViewport.style.touchAction = 'none';
+let cropPanTouch = null;
 cropPreviewViewport.addEventListener('touchstart', e => {
+  if (e.touches.length === 1 && cropInteractionMode === 'pan') {
+    const touch = e.touches[0];
+    cropPanTouch = {
+      x: touch.clientX,
+      y: touch.clientY,
+      left: cropPreviewViewport.scrollLeft,
+      top: cropPreviewViewport.scrollTop
+    };
+    cropCanvas.style.cursor = 'grabbing';
+    e.preventDefault();
+    return;
+  }
   if (e.touches.length === 2) {
+    cropPanTouch = null;
     cropIsPinching = true;
     cropDragStart = null;
     activeCropSelection = null;
@@ -512,6 +526,13 @@ cropPreviewViewport.addEventListener('touchstart', e => {
   }
 }, { passive: false });
 cropPreviewViewport.addEventListener('touchmove', e => {
+  if (cropInteractionMode === 'pan' && cropPanTouch && e.touches.length === 1 && !cropIsPinching) {
+    const touch = e.touches[0];
+    cropPreviewViewport.scrollLeft = cropPanTouch.left - (touch.clientX - cropPanTouch.x);
+    cropPreviewViewport.scrollTop = cropPanTouch.top - (touch.clientY - cropPanTouch.y);
+    e.preventDefault();
+    return;
+  }
   if (!cropIsPinching || e.touches.length !== 2 || !cropPinchStartDistance) return;
   const a = e.touches[0], b = e.touches[1];
   const distance = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
@@ -525,6 +546,10 @@ const finishCropPinch = e => {
     cropIsPinching = false;
     cropPinchStartDistance = 0;
     cropDragStart = null;
+  }
+  if (e.touches.length === 0) {
+    cropPanTouch = null;
+    cropCanvas.style.cursor = cropInteractionMode === 'pan' ? 'grab' : 'crosshair';
   }
 };
 cropPreviewViewport.addEventListener('touchend', finishCropPinch);
