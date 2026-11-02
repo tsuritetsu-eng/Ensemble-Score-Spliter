@@ -763,27 +763,37 @@ const updateCutLine = () => {
   const axis = document.getElementById('spread-axis').value;
   cutLine.style.left = axis === 'horizontal' ? spreadPositionPercent + '%' : '0';
   cutLine.style.top = axis === 'vertical' ? spreadPositionPercent + '%' : '0';
-  cutLine.style.width = axis === 'horizontal' ? '2px' : '100%';
-  cutLine.style.height = axis === 'vertical' ? '2px' : '100%';
+  cutLine.style.width = axis === 'horizontal' ? '52px' : '100%';
+  cutLine.style.height = axis === 'vertical' ? '52px' : '100%';
+  cutLine.style.transform = axis === 'horizontal' ? 'translateX(-50%)' : 'translateY(-50%)';
+  cutLine.style.background = 'transparent';
+  cutLine.style.borderLeft = axis === 'horizontal' ? '4px solid #f43f5e' : 'none';
+  cutLine.style.borderTop = axis === 'vertical' ? '4px solid #f43f5e' : 'none';
   cutLine.style.cursor = axis === 'horizontal' ? 'ew-resize' : 'ns-resize';
+  cutLine.style.touchAction = 'none';
 };
 updateCutLine();
 let draggingCutLine = false;
-cutLine.addEventListener('pointerdown', e => { draggingCutLine = true; cutLine.setPointerCapture(e.pointerId); e.preventDefault(); e.stopPropagation(); });
+cutLine.addEventListener('pointerdown', e => {
+  if (e.pointerType === 'mouse' && e.button !== 0) return;
+  draggingCutLine = true;
+  try { cutLine.setPointerCapture(e.pointerId); } catch (_) {}
+  e.preventDefault();
+  e.stopPropagation();
+});
 cutLine.addEventListener('pointermove', e => {
   if (!draggingCutLine) return;
   const rect = thumbBox.getBoundingClientRect();
   const axis = document.getElementById('spread-axis').value;
-  setSpreadPosition(axis === 'horizontal' ? (e.clientX - rect.left) / rect.width * 100 : (e.clientY - rect.top) / rect.height * 100);
-  document.querySelectorAll('.spread-cut-line').forEach(line => {
-    const a = document.getElementById('spread-axis').value;
-    line.style.left = a === 'horizontal' ? spreadPositionPercent + '%' : '0';
-    line.style.top = a === 'vertical' ? spreadPositionPercent + '%' : '0';
-  });
+  const percent = axis === 'horizontal'
+    ? (e.clientX - rect.left) / Math.max(1, rect.width) * 100
+    : (e.clientY - rect.top) / Math.max(1, rect.height) * 100;
+  setSpreadPosition(percent);
 });
 const stopCutDrag = () => { draggingCutLine = false; };
 cutLine.addEventListener('pointerup', stopCutDrag);
 cutLine.addEventListener('pointercancel', stopCutDrag);
+cutLine.addEventListener('lostpointercapture', stopCutDrag);
 thumbBox.appendChild(cutLine);
 // Checkbox Overlay
 const checkBtn = document.createElement('button');
