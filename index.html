@@ -280,21 +280,15 @@ A3横長などの見開き譜面を真ん中で独立した2枚のページ（A4
 <i data-lucide="x" class="w-5 h-5"></i>
 </button>
 </div>
-<div id="crop-preview-viewport" class="flex-1 min-h-[100px] min-w-0 p-1.5 sm:p-4 overflow-auto flex items-start justify-start bg-slate-900 relative overscroll-contain">
-<div class="absolute top-2 left-2 right-2 z-10 flex flex-wrap items-center justify-between gap-2 pointer-events-none">
-<div class="flex items-center gap-1 rounded-lg bg-slate-800/90 p-1 shadow-lg pointer-events-auto">
-<button id="crop-mode-select" type="button" class="px-3 h-9 rounded-md text-xs font-bold text-white bg-sky-700">範囲選択</button>
-<button id="crop-mode-pan" type="button" class="px-3 h-9 rounded-md text-xs font-bold text-white hover:bg-slate-700">画像移動</button>
-</div>
-<div class="flex items-center gap-1 rounded-lg bg-slate-800/90 p-1 shadow-lg pointer-events-auto">
+<div id="crop-preview-viewport" class="flex-1 min-h-[100px] min-w-0 p-1.5 sm:p-4 overflow-auto flex items-center justify-center bg-slate-900 relative overscroll-contain">
+<div class="absolute top-2 right-2 z-10 flex items-center gap-1 rounded-lg bg-slate-800/90 p-1 shadow-lg">
 <button id="crop-zoom-out" type="button" aria-label="縮小" class="w-9 h-9 rounded-md text-white text-xl font-bold hover:bg-slate-700">−</button>
 <span id="crop-zoom-label" class="min-w-[3.5rem] text-center text-xs text-white tabular-nums">100%</span>
 <button id="crop-zoom-in" type="button" aria-label="拡大" class="w-9 h-9 rounded-md text-white text-xl font-bold hover:bg-slate-700">＋</button>
 <button id="crop-zoom-reset" type="button" class="px-2 h-9 rounded-md text-xs text-white hover:bg-slate-700">リセット</button>
 </div>
-</div>
-<div id="crop-canvas-wrapper" class="relative inline-block border border-slate-700 shadow-lg shrink-0 m-auto">
-<canvas id="crop-canvas" class="block max-w-full max-h-[30dvh] sm:max-h-[58vh] touch-none cursor-crosshair"></canvas>
+<div id="crop-canvas-wrapper" class="relative inline-block border border-slate-700 shadow-lg shrink-0">
+<canvas id="crop-canvas" class="block max-w-full max-h-[30dvh] sm:max-h-[58vh] touch-none cursor-crosshair">
 <div id="crop-overlay" class="absolute border-2 border-brand-500 bg-brand-500/20 cursor-move hidden">
 <div class="absolute -top-1.5 -left-1.5 w-3 h-3 bg-white border border-brand-500"></div>
 <div class="absolute -top-1.5 -right-1.5 w-3 h-3 bg-white border border-brand-500"></div>
@@ -350,27 +344,125 @@ let cropBaseSize = null;
 let cropTouchPoints = new Map();
 let cropPinchStartDistance = 0;
 let cropPinchStartZoom = 1;
-const cropPointers = new Map();
-const cropModeSelectButton = document.getElementById('crop-mode-select');
-const cropModePanButton = document.getElementById('crop-mode-pan');
-function setCropInteractionMode(mode) {
-  cropInteractionMode = mode;
-  cropModeSelectButton.classList.toggle('bg-sky-700', mode === 'select');
-  cropModePanButton.classList.toggle('bg-sky-700', mode === 'pan');
-  cropCanvas.style.cursor = mode === 'select' ? 'crosshair' : 'grab';
+let activeThumbnailRenders = 0;
+const thumbnailQueue = [];
+const MAX_THUMBNAIL_RENDERS = 2;
+let isRecognizing = false;
+let spreadPositionPercent = 50;
+// DOM Elements
+const dropZone = document.getElementById('drop-zone');
+const emptyState = document.getElementById('empty-state');
+const pagesGrid = document.getElementById('pages-grid');
+const fileInput = document.getElementById('file-input');
+const pageCountBadge = document.getElementById('page-count-badge');
+const filterStatus = document.getElementById('filter-status');
+const partCategoryList = document.getElementById('part-category-list');
+const exportMenu = document.getElementById('export-menu');
+// Initial Setup
+document.addEventListener('DOMContentLoaded', () => {
+lucide.createIcons();
+renderPartCategories();
+setupEventListeners();
+});
+// Notifications Helper
+function showToast(msg, type = 'info') {
+const toast = document.getElementById('toast');
+const toastMsg = document.getElementById('toast-msg');
+const toastIcon = document.getElementById('toast-icon');
+toastMsg.innerText = msg;
+toast.className = `fixed bottom-5 right-5 z-50 flex items-center space-x-2 px-4 py-3 rounded-xl shadow-lg text-sm font-medium transition-all duration-300 text-white ${ type === 'error' ? 'bg-red-600' : type === 'success' ? 'bg-emerald-600' : 'bg-slate-800' }`;
+toast.classList.remove('translate-y-20', 'opacity-0');
+setTimeout(() => {
+toast.classList.add('translate-y-20', 'opacity-0');
+}, type === 'error' ? 7000 : 3500);
 }
-cropModeSelectButton.addEventListener('click', () => setCropInteractionMode('select'));
-cropModePanButton.addEventListener('click', () => setCropInteractionMode('pan'));
-function cropMidpoint() {
-  const points = [...cropPointers.values()];
-  return { x: (points[0].x + points[1].x) / 2, y: (points[0].y + points[1].y) / 2 };
+// Event Listeners Registration
+function setupEventListeners() {
+// Theme Toggle
+document.getElementById('btn-theme').addEventListener('click', () => {
+document.documentElement.classList.toggle('dark');
+});
+// Export Dropdown Toggle
+document.getElementById('btn-export-dropdown').addEventListener('click', (e) => {
+e.stopPropagation();
+exportMenu.classList.toggle('hidden');
+});
+document.addEventListener('click', () => exportMenu.classList.add('hidden'));
+// File Upload Button
+document.getElementById('btn-add-file').addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', handleFileSelect);
+// Drag and Drop (Global Window & Zone)
+['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+window.addEventListener(eventName, (e) => {
+e.preventDefault();
+e.stopPropagation();
+});
+});
+dropZone.addEventListener('dragover', () => dropZone.classList.add('bg-slate-100/50', 'dark:bg-slate-700/30'));
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('bg-slate-100/50', 'dark:bg-slate-700/30'));
+dropZone.addEventListener('drop', (e) => {
+dropZone.classList.remove('bg-slate-100/50', 'dark:bg-slate-700/30');
+const files = e.dataTransfer.files;
+if (files && files.length > 0) {
+processFiles(files);
 }
-function cropDistance() {
-  const points = [...cropPointers.values()];
-  return Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y);
+});
+// Batch Actions
+document.getElementById('btn-select-all').addEventListener('click', () => setAllSelected(true));
+document.getElementById('btn-deselect-all').addEventListener('click', () => setAllSelected(false));
+document.getElementById('btn-rotate-selected').addEventListener('click', rotateSelectedPages);
+document.getElementById('btn-delete-selected').addEventListener('click', deleteSelectedPages);
+// OCR Text Recognition
+document.getElementById('btn-auto-detect').addEventListener('click', runAIRecognition);
+setupEnsembleSelector();
+// Spread Splitting
+document.getElementById('btn-split-selected-spread').addEventListener('click', () => splitSpreads(true));
+document.getElementById('btn-split-all-spreads').addEventListener('click', () => splitSpreads(false));
+const spreadPositionInput = document.getElementById('spread-position');
+const spreadPositionLabel = document.getElementById('spread-position-label');
+function setSpreadPosition(value) {
+  spreadPositionPercent = Math.max(20, Math.min(80, Number(value) || 50));
+  spreadPositionInput.value = String(spreadPositionPercent);
+  spreadPositionLabel.textContent = spreadPositionPercent + '%';
+  document.querySelectorAll('.spread-cut-line').forEach(line => {
+    const axis = document.getElementById('spread-axis').value;
+    line.style.left = axis === 'horizontal' ? spreadPositionPercent + '%' : '0';
+    line.style.top = axis === 'vertical' ? spreadPositionPercent + '%' : '0';
+    line.style.width = axis === 'horizontal' ? '52px' : '100%';
+    line.style.height = axis === 'vertical' ? '52px' : '100%';
+  });
 }
-function setCropZoomSize(zoom) {
-  cropZoom = Math.max(1, Math.min(4, zoom));
+spreadPositionInput.addEventListener('input', e => setSpreadPosition(e.target.value));
+document.getElementById('spread-axis').addEventListener('change', () => { renderPagesGrid(); });
+document.getElementById('spread-order').addEventListener('change', () => {});
+// Custom Part Category
+document.getElementById('btn-add-custom-part').addEventListener('click', () => {
+const name = prompt('追加するパート名を入力してください (例: Saxophone 2):');
+if (name && !partCategories.includes(name)) {
+partCategories.splice(partCategories.length - 1, 0, name);
+renderPartCategories();
+}
+});
+// Export Buttons
+document.getElementById('btn-export-pdf').addEventListener('click', exportMergedPDF);
+document.getElementById('btn-export-zip').addEventListener('click', exportPartsZIP);
+// Crop Modal Actions
+document.getElementById('btn-close-crop').addEventListener('click', closeCropModal);
+document.getElementById('btn-cancel-crop').addEventListener('click', closeCropModal);
+// Crop selection by pointer; stored in PDF points for lossless export.
+const cropCanvas = document.getElementById('crop-canvas');
+const cropOverlay = document.getElementById('crop-overlay');
+const cropPreviewViewport = document.getElementById('crop-preview-viewport');
+const cropCanvasWrapper = document.getElementById('crop-canvas-wrapper');
+const cropZoomLabel = document.getElementById('crop-zoom-label');
+function applyCropZoom(nextZoom, focalClientX = null, focalClientY = null) {
+  const oldZoom = cropZoom;
+  const rect = cropPreviewViewport.getBoundingClientRect();
+  const focalX = focalClientX === null ? rect.left + rect.width / 2 : focalClientX;
+  const focalY = focalClientY === null ? rect.top + rect.height / 2 : focalClientY;
+  const anchorX = (cropPreviewViewport.scrollLeft + focalX - rect.left) / oldZoom;
+  const anchorY = (cropPreviewViewport.scrollTop + focalY - rect.top) / oldZoom;
+  cropZoom = Math.max(1, Math.min(4, nextZoom));
   if (cropBaseSize) {
     const width = cropBaseSize.width * cropZoom;
     const height = cropBaseSize.height * cropZoom;
@@ -382,105 +474,106 @@ function setCropZoomSize(zoom) {
     cropCanvasWrapper.style.height = `${height}px`;
   }
   cropZoomLabel.textContent = `${Math.round(cropZoom * 100)}%`;
+  requestAnimationFrame(() => {
+    cropPreviewViewport.scrollLeft = Math.max(0, anchorX * cropZoom - (focalX - rect.left));
+    cropPreviewViewport.scrollTop = Math.max(0, anchorY * cropZoom - (focalY - rect.top));
+  });
 }
+document.getElementById('crop-zoom-in').addEventListener('click', () => applyCropZoom(cropZoom + 0.25));
+document.getElementById('crop-zoom-out').addEventListener('click', () => applyCropZoom(cropZoom - 0.25));
+document.getElementById('crop-zoom-reset').addEventListener('click', () => {
+  applyCropZoom(1);
+  cropPreviewViewport.scrollTo({ left: 0, top: 0, behavior: 'smooth' });
+});
+let cropInteractionMode = 'select';
+let cropIsPinching = false;
+let cropPanPointer = null;
+const cropModeSelectButton = document.getElementById('crop-mode-select');
+const cropModePanButton = document.getElementById('crop-mode-pan');
+function setCropInteractionMode(mode) {
+  cropInteractionMode = mode;
+  cropModeSelectButton.classList.toggle('bg-sky-700', mode === 'select');
+  cropModePanButton.classList.toggle('bg-sky-700', mode === 'pan');
+  cropCanvas.style.cursor = mode === 'select' ? 'crosshair' : 'grab';
+}
+cropModeSelectButton.addEventListener('click', () => setCropInteractionMode('select'));
+cropModePanButton.addEventListener('click', () => setCropInteractionMode('pan'));
 cropPreviewViewport.style.touchAction = 'none';
-function cropCanvasPoint(clientX, clientY) {
-  const rect = cropCanvas.getBoundingClientRect();
-  const scaleX = cropCanvas.width / Math.max(1, rect.width);
-  const scaleY = cropCanvas.height / Math.max(1, rect.height);
-  return {
-    x: Math.max(0, Math.min(cropCanvas.width, (clientX - rect.left) * scaleX)),
-    y: Math.max(0, Math.min(cropCanvas.height, (clientY - rect.top) * scaleY))
-  };
-}
-cropPreviewViewport.addEventListener('pointerdown', e => {
-  if (e.target.closest('button')) return;
-  if (e.pointerType === 'mouse' && e.button !== 0) return;
-  try { cropPreviewViewport.setPointerCapture(e.pointerId); } catch (_) {}
-  cropPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-  if (cropPointers.size >= 2) {
-    cropGestureMode = 'pinch';
-    cropPointerStart = null;
+cropPreviewViewport.addEventListener('touchstart', e => {
+  if (e.touches.length === 2) {
+    cropIsPinching = true;
     cropDragStart = null;
-    cropPanStart = null;
-    cropPinchStartDistance = Math.max(1, cropDistance());
-    cropPinchStartZoom = cropZoom;
     activeCropSelection = null;
     cropOverlay.classList.add('hidden');
-  } else if (cropPointers.size === 1) {
-    if (cropInteractionMode === 'pan' || cropZoom > 1 && e.target !== cropCanvas) {
-      cropGestureMode = 'pan';
-      cropPanStart = { x: e.clientX, y: e.clientY, left: cropPreviewViewport.scrollLeft, top: cropPreviewViewport.scrollTop };
-      cropCanvas.style.cursor = 'grabbing';
-    } else if (cropInteractionMode === 'select') {
-      const point = cropCanvasPoint(e.clientX, e.clientY);
-      const rect = cropCanvas.getBoundingClientRect();
-      if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) {
-        cropGestureMode = 'pan';
-        cropPanStart = { x: e.clientX, y: e.clientY, left: cropPreviewViewport.scrollLeft, top: cropPreviewViewport.scrollTop };
-      } else {
-        cropGestureMode = 'select';
-        cropPointerStart = point;
-        cropDragStart = point;
-        activeCropSelection = { x: point.x, y: point.y, width: 1, height: 1 };
-        updateCropOverlay(point.x, point.y, 1, 1);
-      }
-    } else {
-      cropGestureMode = 'pan';
-      cropPanStart = { x: e.clientX, y: e.clientY, left: cropPreviewViewport.scrollLeft, top: cropPreviewViewport.scrollTop };
-    }
+    const a = e.touches[0], b = e.touches[1];
+    cropPinchStartDistance = Math.max(1, Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY));
+    cropPinchStartZoom = cropZoom;
+    e.preventDefault();
   }
+}, { passive: false });
+cropPreviewViewport.addEventListener('touchmove', e => {
+  if (!cropIsPinching || e.touches.length !== 2 || !cropPinchStartDistance) return;
+  const a = e.touches[0], b = e.touches[1];
+  const distance = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+  const midpointX = (a.clientX + b.clientX) / 2;
+  const midpointY = (a.clientY + b.clientY) / 2;
+  applyCropZoom(cropPinchStartZoom * distance / cropPinchStartDistance, midpointX, midpointY);
+  e.preventDefault();
+}, { passive: false });
+const finishCropPinch = e => {
+  if (e.touches.length < 2) {
+    cropIsPinching = false;
+    cropPinchStartDistance = 0;
+    cropDragStart = null;
+  }
+};
+cropPreviewViewport.addEventListener('touchend', finishCropPinch);
+cropPreviewViewport.addEventListener('touchcancel', finishCropPinch);
+cropCanvas.addEventListener('pointerdown', e => {
+  if (cropInteractionMode !== 'select' || cropIsPinching || (e.pointerType === 'mouse' && e.button !== 0)) return;
+  const rect = cropCanvas.getBoundingClientRect();
+  const x = Math.max(0, Math.min(cropCanvas.width, (e.clientX - rect.left) * cropCanvas.width / Math.max(1, rect.width)));
+  const y = Math.max(0, Math.min(cropCanvas.height, (e.clientY - rect.top) * cropCanvas.height / Math.max(1, rect.height)));
+  cropDragStart = { x, y };
+  activeCropSelection = { x, y, width: 1, height: 1 };
+  try { cropCanvas.setPointerCapture(e.pointerId); } catch (_) {}
+  updateCropOverlay(x, y, 1, 1);
+  e.preventDefault();
+});
+cropCanvas.addEventListener('pointermove', e => {
+  if (!cropDragStart || cropIsPinching || cropInteractionMode !== 'select') return;
+  const rect = cropCanvas.getBoundingClientRect();
+  const x = Math.max(0, Math.min(cropCanvas.width, (e.clientX - rect.left) * cropCanvas.width / Math.max(1, rect.width)));
+  const y = Math.max(0, Math.min(cropCanvas.height, (e.clientY - rect.top) * cropCanvas.height / Math.max(1, rect.height)));
+  activeCropSelection = { x: Math.min(cropDragStart.x, x), y: Math.min(cropDragStart.y, y),
+    width: Math.abs(x - cropDragStart.x), height: Math.abs(y - cropDragStart.y) };
+  updateCropOverlay(cropDragStart.x, cropDragStart.y, x - cropDragStart.x, y - cropDragStart.y);
+  e.preventDefault();
+});
+const finishCropPointer = () => { cropDragStart = null; };
+cropCanvas.addEventListener('pointerup', finishCropPointer);
+cropCanvas.addEventListener('pointercancel', finishCropPointer);
+cropPreviewViewport.addEventListener('pointerdown', e => {
+  if (cropInteractionMode !== 'pan' || cropIsPinching || e.target.closest('button') || (e.pointerType === 'mouse' && e.button !== 0)) return;
+  cropPanPointer = { id: e.pointerId, x: e.clientX, y: e.clientY, left: cropPreviewViewport.scrollLeft, top: cropPreviewViewport.scrollTop };
+  try { cropPreviewViewport.setPointerCapture(e.pointerId); } catch (_) {}
+  cropCanvas.style.cursor = 'grabbing';
   e.preventDefault();
 });
 cropPreviewViewport.addEventListener('pointermove', e => {
-  if (!cropPointers.has(e.pointerId)) return;
-  cropPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-  if (cropPointers.size >= 2 && cropGestureMode === 'pinch') {
-    const distance = cropDistance();
-    const midpoint = cropMidpoint();
-    applyCropZoom(cropPinchStartZoom * distance / Math.max(1, cropPinchStartDistance), midpoint.x, midpoint.y);
-    e.preventDefault();
-    return;
-  }
-  if (cropGestureMode === 'pan' && cropPanStart && cropPointers.size === 1) {
-    cropPreviewViewport.scrollLeft = cropPanStart.left - (e.clientX - cropPanStart.x);
-    cropPreviewViewport.scrollTop = cropPanStart.top - (e.clientY - cropPanStart.y);
-    e.preventDefault();
-    return;
-  }
-  if (cropGestureMode === 'select' && cropPointerStart && cropPointers.size === 1) {
-    const point = cropCanvasPoint(e.clientX, e.clientY);
-    activeCropSelection = {
-      x: Math.min(cropPointerStart.x, point.x),
-      y: Math.min(cropPointerStart.y, point.y),
-      width: Math.abs(point.x - cropPointerStart.x),
-      height: Math.abs(point.y - cropPointerStart.y)
-    };
-    updateCropOverlay(cropPointerStart.x, cropPointerStart.y, point.x - cropPointerStart.x, point.y - cropPointerStart.y);
-    e.preventDefault();
-  }
+  if (!cropPanPointer || cropPanPointer.id !== e.pointerId || cropIsPinching) return;
+  cropPreviewViewport.scrollLeft = cropPanPointer.left - (e.clientX - cropPanPointer.x);
+  cropPreviewViewport.scrollTop = cropPanPointer.top - (e.clientY - cropPanPointer.y);
+  e.preventDefault();
 });
-function finishCropPointer(e) {
-  cropPointers.delete(e.pointerId);
-  if (cropPointers.size < 2) cropPinchStartDistance = 0;
-  if (cropPointers.size === 1 && cropGestureMode === 'pinch') {
-    const remaining = [...cropPointers.values()][0];
-    cropGestureMode = 'pan';
-    cropPanStart = { x: remaining.x, y: remaining.y, left: cropPreviewViewport.scrollLeft, top: cropPreviewViewport.scrollTop };
+const finishCropPan = e => {
+  if (cropPanPointer && (!e || cropPanPointer.id === e.pointerId)) {
+    cropPanPointer = null;
+    cropCanvas.style.cursor = 'grab';
   }
-  if (cropPointers.size === 0) {
-    cropGestureMode = null;
-    cropPointerStart = null;
-    cropDragStart = null;
-    cropPanStart = null;
-    cropCanvas.style.cursor = cropInteractionMode === 'select' ? 'crosshair' : 'grab';
-  }
-}
-cropPreviewViewport.addEventListener('pointerup', finishCropPointer);
-cropPreviewViewport.addEventListener('pointercancel', finishCropPointer);
-cropPreviewViewport.addEventListener('lostpointercapture', e => {
-  if (cropPointers.has(e.pointerId)) finishCropPointer(e);
-});
+};
+cropPreviewViewport.addEventListener('pointerup', finishCropPan);
+cropPreviewViewport.addEventListener('pointercancel', finishCropPan);
 const updateCropOverlay = (x, y, w, h) => {
 const rect = cropCanvas.getBoundingClientRect();
 const scaleX = rect.width / Math.max(1, cropCanvas.width);
@@ -492,6 +585,26 @@ cropOverlay.style.top = `${Math.min(y, y + h) * scaleY}px`;
 cropOverlay.style.width = `${Math.abs(w) * scaleX}px`;
 cropOverlay.style.height = `${Math.abs(h) * scaleY}px`;
 };
+cropCanvas.addEventListener('pointerdown', (e) => {
+const r = cropCanvas.getBoundingClientRect();
+const x = (e.clientX - r.left) * cropCanvas.width / r.width;
+const y = (e.clientY - r.top) * cropCanvas.height / r.height;
+cropDragStart = { x, y };
+activeCropSelection = { x, y, width: 1, height: 1 };
+cropCanvas.setPointerCapture(e.pointerId);
+updateCropOverlay(x, y, 1, 1);
+});
+cropCanvas.addEventListener('pointermove', (e) => {
+if (!cropDragStart) return;
+const r = cropCanvas.getBoundingClientRect();
+const x = (e.clientX - r.left) * cropCanvas.width / r.width;
+const y = (e.clientY - r.top) * cropCanvas.height / r.height;
+activeCropSelection = { x: Math.min(cropDragStart.x, x), y: Math.min(cropDragStart.y, y), width: Math.abs(x - cropDragStart.x), height: Math.abs(y - cropDragStart.y) };
+updateCropOverlay(cropDragStart.x, cropDragStart.y, x - cropDragStart.x, y - cropDragStart.y);
+});
+const finishCropPointer = () => { cropDragStart = null; };
+cropCanvas.addEventListener('pointerup', finishCropPointer);
+cropCanvas.addEventListener('pointercancel', finishCropPointer);
 document.getElementById('btn-reset-crop').addEventListener('click', () => {
 if (activeCropPageIndex === null) return;
 pageList[activeCropPageIndex].cropBox = null;
@@ -663,50 +776,33 @@ canvas.style.transform = `rotate(${pageItem.rotation}deg)`;
 thumbBox.appendChild(canvas);
 // Draggable split guide (preview only; shared split position)
 const cutLine = document.createElement('div');
-cutLine.className = 'spread-cut-line absolute z-[5] touch-none';
+cutLine.className = 'spread-cut-line absolute z-[5] bg-rose-500 shadow-[0_0_0_1px_rgba(255,255,255,.8)]';
 cutLine.style.pointerEvents = 'auto';
 const updateCutLine = () => {
   const axis = document.getElementById('spread-axis').value;
   cutLine.style.left = axis === 'horizontal' ? spreadPositionPercent + '%' : '0';
   cutLine.style.top = axis === 'vertical' ? spreadPositionPercent + '%' : '0';
-  cutLine.style.width = axis === 'horizontal' ? '28px' : '100%';
-  cutLine.style.height = axis === 'vertical' ? '28px' : '100%';
-  cutLine.style.transform = axis === 'horizontal' ? 'translateX(-50%)' : 'translateY(-50%)';
-  cutLine.style.background = 'transparent';
-  cutLine.style.borderLeft = axis === 'horizontal' ? '3px solid #f43f5e' : 'none';
-  cutLine.style.borderTop = axis === 'vertical' ? '3px solid #f43f5e' : 'none';
+  cutLine.style.width = axis === 'horizontal' ? '2px' : '100%';
+  cutLine.style.height = axis === 'vertical' ? '2px' : '100%';
   cutLine.style.cursor = axis === 'horizontal' ? 'ew-resize' : 'ns-resize';
-  cutLine.style.touchAction = 'none';
 };
 updateCutLine();
 let draggingCutLine = false;
-const cutAxis = document.getElementById('spread-axis').value;
-cutLine.style.width = cutAxis === 'horizontal' ? '52px' : '100%';
-cutLine.style.height = cutAxis === 'vertical' ? '52px' : '100%';
-cutLine.style.zIndex = '20';
-cutLine.style.boxSizing = 'border-box';
-cutLine.style.borderLeft = cutAxis === 'horizontal' ? '4px solid #f43f5e' : 'none';
-cutLine.style.borderTop = cutAxis === 'vertical' ? '4px solid #f43f5e' : 'none';
-cutLine.addEventListener('pointerdown', e => {
-  if (e.pointerType === 'mouse' && e.button !== 0) return;
-  draggingCutLine = true;
-  try { cutLine.setPointerCapture(e.pointerId); } catch (_) {}
-  e.preventDefault();
-  e.stopPropagation();
-});
+cutLine.addEventListener('pointerdown', e => { draggingCutLine = true; cutLine.setPointerCapture(e.pointerId); e.preventDefault(); e.stopPropagation(); });
 cutLine.addEventListener('pointermove', e => {
   if (!draggingCutLine) return;
   const rect = thumbBox.getBoundingClientRect();
-  const axisNow = document.getElementById('spread-axis').value;
-  const value = axisNow === 'horizontal'
-    ? (e.clientX - rect.left) / Math.max(1, rect.width) * 100
-    : (e.clientY - rect.top) / Math.max(1, rect.height) * 100;
-  setSpreadPosition(value);
+  const axis = document.getElementById('spread-axis').value;
+  setSpreadPosition(axis === 'horizontal' ? (e.clientX - rect.left) / rect.width * 100 : (e.clientY - rect.top) / rect.height * 100);
+  document.querySelectorAll('.spread-cut-line').forEach(line => {
+    const a = document.getElementById('spread-axis').value;
+    line.style.left = a === 'horizontal' ? spreadPositionPercent + '%' : '0';
+    line.style.top = a === 'vertical' ? spreadPositionPercent + '%' : '0';
+  });
 });
 const stopCutDrag = () => { draggingCutLine = false; };
 cutLine.addEventListener('pointerup', stopCutDrag);
 cutLine.addEventListener('pointercancel', stopCutDrag);
-cutLine.addEventListener('lostpointercapture', stopCutDrag);
 thumbBox.appendChild(cutLine);
 // Checkbox Overlay
 const checkBtn = document.createElement('button');
@@ -1593,12 +1689,6 @@ overlay.classList.add('hidden');
 activeCropSelection = null;
 cropDragStart = null;
 cropZoom = 1;
-cropPointers.clear();
-cropGestureMode = null;
-cropPointerStart = null;
-cropPanStart = null;
-cropPinchStartDistance = 0;
-setCropInteractionMode('select');
 cropBaseSize = { width: canvas.getBoundingClientRect().width, height: canvas.getBoundingClientRect().height };
 canvas.style.width = '';
 canvas.style.height = '';
