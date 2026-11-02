@@ -836,9 +836,12 @@ const updateCutLine = () => {
     cutLine.style.height = '44px';
     cutLine.style.transform = 'translateY(-50%)';
   }
-  cutLine.style.background = 'transparent';
-  cutLine.style.borderLeft = axis === 'horizontal' ? '4px solid #f43f5e' : 'none';
-  cutLine.style.borderTop = axis === 'vertical' ? '4px solid #f43f5e' : 'none';
+  // 44pxのドラッグ領域の中央に、4pxの赤線を描く。
+  // border-leftを使うとドラッグ領域の左端に線が寄るため、中央配置のgradientにする。
+  cutLine.style.border = 'none';
+  cutLine.style.background = axis === 'horizontal'
+    ? 'linear-gradient(to right, transparent calc(50% - 2px), #f43f5e calc(50% - 2px), #f43f5e calc(50% + 2px), transparent calc(50% + 2px))'
+    : 'linear-gradient(to bottom, transparent calc(50% - 2px), #f43f5e calc(50% - 2px), #f43f5e calc(50% + 2px), transparent calc(50% + 2px))';
   cutLine.style.cursor = axis === 'horizontal' ? 'ew-resize' : 'ns-resize';
   cutLine.style.touchAction = 'none';
 };
