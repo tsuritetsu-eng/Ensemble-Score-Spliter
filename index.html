@@ -280,7 +280,7 @@ A3横長などの見開き譜面を真ん中で独立した2枚のページ（A4
 <i data-lucide="x" class="w-5 h-5"></i>
 </button>
 </div>
-<div id="crop-preview-viewport" class="flex-1 min-h-[100px] min-w-0 p-1.5 sm:p-4 overflow-auto flex items-center justify-center bg-slate-900 relative overscroll-contain">
+<div id="crop-preview-viewport" class="flex-1 min-h-[100px] min-w-0 p-1.5 sm:p-4 overflow-auto flex items-start justify-start bg-slate-900 relative overscroll-contain">
 <div class="absolute top-2 left-2 right-2 z-10 flex flex-wrap items-center justify-between gap-2 pointer-events-none">
 <div class="flex items-center gap-1 rounded-lg bg-slate-800/90 p-1 shadow-lg pointer-events-auto">
 <button id="crop-mode-select" type="button" class="px-3 h-9 rounded-md text-xs font-bold text-white bg-sky-700">範囲選択</button>
@@ -293,7 +293,7 @@ A3横長などの見開き譜面を真ん中で独立した2枚のページ（A4
 <button id="crop-zoom-reset" type="button" class="px-2 h-9 rounded-md text-xs text-white hover:bg-slate-700">リセット</button>
 </div>
 </div>
-<div id="crop-canvas-wrapper" class="relative inline-block border border-slate-700 shadow-lg shrink-0">
+<div id="crop-canvas-wrapper" class="relative inline-block border border-slate-700 shadow-lg shrink-0 m-auto">
 <canvas id="crop-canvas" class="block max-w-full max-h-[30dvh] sm:max-h-[58vh] touch-none cursor-crosshair"></canvas>
 <div id="crop-overlay" class="absolute border-2 border-brand-500 bg-brand-500/20 cursor-move hidden">
 <div class="absolute -top-1.5 -left-1.5 w-3 h-3 bg-white border border-brand-500"></div>
@@ -1737,6 +1737,12 @@ overlay.classList.add('hidden');
 activeCropSelection = null;
 cropDragStart = null;
 cropZoom = 1;
+cropPointers.clear();
+cropGestureMode = null;
+cropPointerStart = null;
+cropPanStart = null;
+cropPinchStartDistance = 0;
+setCropInteractionMode('select');
 cropBaseSize = { width: canvas.getBoundingClientRect().width, height: canvas.getBoundingClientRect().height };
 canvas.style.width = '';
 canvas.style.height = '';
