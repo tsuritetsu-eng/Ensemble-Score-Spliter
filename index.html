@@ -113,17 +113,17 @@ transition: transform 0.15s ease;
 <span>ファイルを選択して追加</span>
 </button>
 </div>
-<!-- AI Part Auto Recognition -->
+<!-- OCR Text Recognition -->
 <div class="bg-white dark:bg-slate-800 p-4 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700">
 <div class="flex items-center justify-between mb-2">
 <h2 class="text-sm font-semibold flex items-center space-x-2 text-slate-700 dark:text-slate-200">
 <i data-lucide="sparkles" class="w-4 h-4 text-amber-500"></i>
-<span>OCR パート自動認識</span>
+<span>OCRで文字認識・パート分類</span>
 </h2>
 <span class="text-[10px] font-bold px-1.5 py-0.5 bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 rounded">端末内OCR</span>
 </div>
 <p class="text-xs text-slate-500 dark:text-slate-400 mb-3">
-楽器名・略称をOCRで読み取り、編成を指定した場合は選択した楽器だけを候補にして分類します。画像やPDFは外部サーバーへ送信しません。
+PDF内の文字情報とページ画像をOCRで文字認識し、楽器名・略称からパートを分類します。編成を指定すると、選択した楽器だけを候補にします。PDFや画像は端末内で処理し、外部サーバーへ送信しません。
 </p>
 <div class="mb-3 space-y-2">
 <label class="block text-xs font-semibold text-slate-700 dark:text-slate-200" for="ensemble-preset">編成プリセット</label>
@@ -152,7 +152,7 @@ transition: transform 0.15s ease;
 </div>
 <button id="btn-auto-detect" class="w-full py-2.5 px-4 bg-amber-500 hover:bg-amber-600 text-white font-medium text-sm rounded-lg shadow-sm flex items-center justify-center space-x-2 transition">
 <i data-lucide="scan-line" class="w-4 h-4"></i>
-<span>OCRでパート名を認識</span>
+<span>OCRで文字認識を実行</span>
 </button>
 </div>
 <!-- A3 Spread Split (pdfsplit style) -->
@@ -254,7 +254,7 @@ A3横長などの見開き譜面を真ん中で独立した2枚のページ（A4
 </div>
 <h3 class="text-base font-semibold text-slate-700 dark:text-slate-200 mb-1">ここにPDF楽譜ファイルをドラッグ＆ドロップ</h3>
 <p class="text-xs text-slate-400 max-w-sm mb-4">またはファイル選択ボタンから読み込んでください（複数可）</p>
-<span class="px-3 py-1 bg-slate-100 dark:bg-slate-700 text-slate-500 text-[11px] rounded-full">Gemini AIによるページ全体の画像認識（ページ画像を外部送信します）</span>
+<span class="px-3 py-1 bg-slate-100 dark:bg-slate-700 text-slate-500 text-[11px] rounded-full">OCRで文字認識：PDFは端末内で処理され、外部送信されません</span>
 </div>
 <!-- Pages Grid Container -->
 <div id="pages-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5 relative z-10">
@@ -381,7 +381,7 @@ document.getElementById('btn-select-all').addEventListener('click', () => setAll
 document.getElementById('btn-deselect-all').addEventListener('click', () => setAllSelected(false));
 document.getElementById('btn-rotate-selected').addEventListener('click', rotateSelectedPages);
 document.getElementById('btn-delete-selected').addEventListener('click', deleteSelectedPages);
-// AI Recognition
+// OCR Text Recognition
 document.getElementById('btn-auto-detect').addEventListener('click', runAIRecognition);
 setupEnsembleSelector();
 // Spread Splitting
@@ -1131,8 +1131,8 @@ async function runAIRecognition() {
     for (let i = 0; i < pageList.length; i++) {
       const pageItem = pageList[i];
       try {
-        button.innerHTML = '<span>OCR認識中 ' + (i + 1) + '/' + pageList.length + '</span>';
-        showToast('ページ内6箇所の楽器名候補をOCRで読み取っています ' + (i + 1) + '/' + pageList.length, 'info');
+        button.innerHTML = '<span>OCRで文字認識中 ' + (i + 1) + '/' + pageList.length + '</span>';
+        showToast('ページ内の楽器名欄をOCRで文字認識しています ' + (i + 1) + '/' + pageList.length, 'info');
         const result = await recognizePartWithOcr(worker, pageItem, allowedCategories);
         const matched = partCategories.find(c => c.toLowerCase() === result.part.toLowerCase());
         if (!matched) throw new Error('登録済みの楽器名に一致しません: ' + result.part);
@@ -1151,7 +1151,7 @@ async function runAIRecognition() {
     renderPagesGrid();
     const firstFailure = failureDetails[0];
     const summary = firstFailure ? '（例：P' + firstFailure.page + ' ' + firstFailure.reason + '）' : '';
-    showToast('OCR認識完了：' + detectedCount + 'ページ成功' + (failedCount ? '、' + failedCount + 'ページ失敗 ' + summary : ''), failedCount ? 'error' : 'success');
+    showToast('OCRでの文字認識完了：' + detectedCount + 'ページ成功' + (failedCount ? '、' + failedCount + 'ページ失敗 ' + summary : ''), failedCount ? 'error' : 'success');
   } catch (err) {
     console.error('Browser OCR failed:', err);
     showToast('OCRの起動に失敗しました。通信環境を確認して再読み込みしてください。', 'error');
