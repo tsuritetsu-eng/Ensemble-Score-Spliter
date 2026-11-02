@@ -807,8 +807,9 @@ renderPagesGrid();
 const thumbBox = document.createElement('div');
 thumbBox.className = 'w-full h-64 sm:h-72 lg:h-80 bg-slate-100 dark:bg-slate-800 relative flex items-center justify-center p-3 overflow-hidden';
 const canvas = document.createElement('canvas');
-canvas.className = 'max-h-full max-w-full object-contain shadow-sm rounded transition-transform duration-200';
-canvas.style.transform = `rotate(${pageItem.rotation}deg)`;
+canvas.className = 'max-h-full max-w-full object-contain shadow-sm rounded'; 
+// PDF.js viewport already applies page rotation; do not rotate the canvas again.
+canvas.style.transform = 'none';
 thumbBox.appendChild(canvas);
 // Draggable split guide (preview only; shared split position)
 const cutLine = document.createElement('div');
@@ -819,6 +820,7 @@ const updateCutLine = () => {
   const axis = document.getElementById('spread-axis').value;
   const boxRect = thumbBox.getBoundingClientRect();
   const previewRect = canvas.getBoundingClientRect();
+  // Align the guide to the actual, already-rotated PDF canvas bounds.
   const offsetX = previewRect.left - boxRect.left;
   const offsetY = previewRect.top - boxRect.top;
   if (axis === 'horizontal') {
