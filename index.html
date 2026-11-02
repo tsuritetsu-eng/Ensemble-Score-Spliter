@@ -778,6 +778,7 @@ thumbBox.appendChild(canvas);
 const cutLine = document.createElement('div');
 cutLine.className = 'spread-cut-line absolute z-[5] bg-rose-500 shadow-[0_0_0_1px_rgba(255,255,255,.8)]';
 cutLine.style.pointerEvents = 'auto';
+cutLine.style.boxSizing = 'border-box';
 const updateCutLine = () => {
   const axis = document.getElementById('spread-axis').value;
   cutLine.style.left = axis === 'horizontal' ? spreadPositionPercent + '%' : '0';
