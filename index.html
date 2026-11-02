@@ -889,6 +889,8 @@ if (job.pageItem.cropBox) {
   if (!ctx) throw new Error('プレビュー画像を初期化できません');
   await page.render({ canvasContext: ctx, viewport }).promise;
 }
+const splitGuide = job.canvas.parentElement?.querySelector('.spread-cut-line');
+if (splitGuide && typeof splitGuide._updateCutLine === 'function') splitGuide._updateCutLine();
 } catch (err) {
 console.error('Thumbnail render error:', err);
 const card = job.canvas.closest('.group');
@@ -1692,6 +1694,12 @@ const overlay = document.getElementById('crop-overlay');
 overlay.classList.add('hidden');
 activeCropSelection = null;
 cropDragStart = null;
+cropIsPinching = false;
+cropPinchStartDistance = 0;
+cropPanPointer = null;
+cropInteractionMode = 'select';
+cropModeSelectButton.classList.add('bg-sky-700');
+cropModePanButton.classList.remove('bg-sky-700');
 cropZoom = 1;
 cropBaseSize = { width: canvas.getBoundingClientRect().width, height: canvas.getBoundingClientRect().height };
 canvas.style.width = '';
