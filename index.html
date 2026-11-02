@@ -281,6 +281,10 @@ A3横長などの見開き譜面を真ん中で独立した2枚のページ（A4
 </button>
 </div>
 <div id="crop-preview-viewport" class="flex-1 min-h-[100px] min-w-0 p-1.5 sm:p-4 overflow-auto flex items-center justify-center bg-slate-900 relative overscroll-contain">
+<div class="absolute top-2 left-2 z-10 flex items-center gap-1 rounded-lg bg-slate-800/90 p-1 shadow-lg">
+<button id="crop-mode-select" type="button" class="px-2 h-9 rounded-md text-xs text-white bg-sky-700">範囲選択</button>
+<button id="crop-mode-pan" type="button" class="px-2 h-9 rounded-md text-xs text-white hover:bg-slate-700">移動</button>
+</div>
 <div class="absolute top-2 right-2 z-10 flex items-center gap-1 rounded-lg bg-slate-800/90 p-1 shadow-lg">
 <button id="crop-zoom-out" type="button" aria-label="縮小" class="w-9 h-9 rounded-md text-white text-xl font-bold hover:bg-slate-700">−</button>
 <span id="crop-zoom-label" class="min-w-[3.5rem] text-center text-xs text-white tabular-nums">100%</span>
@@ -288,7 +292,7 @@ A3横長などの見開き譜面を真ん中で独立した2枚のページ（A4
 <button id="crop-zoom-reset" type="button" class="px-2 h-9 rounded-md text-xs text-white hover:bg-slate-700">リセット</button>
 </div>
 <div id="crop-canvas-wrapper" class="relative inline-block border border-slate-700 shadow-lg shrink-0">
-<canvas id="crop-canvas" class="block max-w-full max-h-[30dvh] sm:max-h-[58vh] touch-none cursor-crosshair">
+<canvas id="crop-canvas" class="block max-w-full max-h-[30dvh] sm:max-h-[58vh] touch-none cursor-crosshair"></canvas>
 <div id="crop-overlay" class="absolute border-2 border-brand-500 bg-brand-500/20 cursor-move hidden">
 <div class="absolute -top-1.5 -left-1.5 w-3 h-3 bg-white border border-brand-500"></div>
 <div class="absolute -top-1.5 -right-1.5 w-3 h-3 bg-white border border-brand-500"></div>
@@ -425,11 +429,7 @@ function setSpreadPosition(value) {
   spreadPositionInput.value = String(spreadPositionPercent);
   spreadPositionLabel.textContent = spreadPositionPercent + '%';
   document.querySelectorAll('.spread-cut-line').forEach(line => {
-    const axis = document.getElementById('spread-axis').value;
-    line.style.left = axis === 'horizontal' ? spreadPositionPercent + '%' : '0';
-    line.style.top = axis === 'vertical' ? spreadPositionPercent + '%' : '0';
-    line.style.width = axis === 'horizontal' ? '52px' : '100%';
-    line.style.height = axis === 'vertical' ? '52px' : '100%';
+    if (typeof line._updateCutLine === 'function') line._updateCutLine();
   });
 }
 spreadPositionInput.addEventListener('input', e => setSpreadPosition(e.target.value));
@@ -761,17 +761,30 @@ cutLine.style.pointerEvents = 'auto';
 cutLine.style.boxSizing = 'border-box';
 const updateCutLine = () => {
   const axis = document.getElementById('spread-axis').value;
-  cutLine.style.left = axis === 'horizontal' ? spreadPositionPercent + '%' : '0';
-  cutLine.style.top = axis === 'vertical' ? spreadPositionPercent + '%' : '0';
-  cutLine.style.width = axis === 'horizontal' ? '52px' : '100%';
-  cutLine.style.height = axis === 'vertical' ? '52px' : '100%';
-  cutLine.style.transform = axis === 'horizontal' ? 'translateX(-50%)' : 'translateY(-50%)';
+  const boxRect = thumbBox.getBoundingClientRect();
+  const previewRect = canvas.getBoundingClientRect();
+  const offsetX = previewRect.left - boxRect.left;
+  const offsetY = previewRect.top - boxRect.top;
+  if (axis === 'horizontal') {
+    cutLine.style.left = (offsetX + previewRect.width * spreadPositionPercent / 100) + 'px';
+    cutLine.style.top = offsetY + 'px';
+    cutLine.style.width = '44px';
+    cutLine.style.height = previewRect.height + 'px';
+    cutLine.style.transform = 'translateX(-50%)';
+  } else {
+    cutLine.style.left = offsetX + 'px';
+    cutLine.style.top = (offsetY + previewRect.height * spreadPositionPercent / 100) + 'px';
+    cutLine.style.width = previewRect.width + 'px';
+    cutLine.style.height = '44px';
+    cutLine.style.transform = 'translateY(-50%)';
+  }
   cutLine.style.background = 'transparent';
   cutLine.style.borderLeft = axis === 'horizontal' ? '4px solid #f43f5e' : 'none';
   cutLine.style.borderTop = axis === 'vertical' ? '4px solid #f43f5e' : 'none';
   cutLine.style.cursor = axis === 'horizontal' ? 'ew-resize' : 'ns-resize';
   cutLine.style.touchAction = 'none';
 };
+cutLine._updateCutLine = updateCutLine;
 updateCutLine();
 let draggingCutLine = false;
 cutLine.addEventListener('pointerdown', e => {
@@ -783,7 +796,7 @@ cutLine.addEventListener('pointerdown', e => {
 });
 cutLine.addEventListener('pointermove', e => {
   if (!draggingCutLine) return;
-  const rect = thumbBox.getBoundingClientRect();
+  const rect = canvas.getBoundingClientRect();
   const axis = document.getElementById('spread-axis').value;
   const percent = axis === 'horizontal'
     ? (e.clientX - rect.left) / Math.max(1, rect.width) * 100
