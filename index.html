@@ -821,8 +821,10 @@ const updateCutLine = () => {
   const boxRect = thumbBox.getBoundingClientRect();
   const previewRect = canvas.getBoundingClientRect();
   // Align the guide to the actual, already-rotated PDF canvas bounds.
-  const offsetX = previewRect.left - boxRect.left;
-  const offsetY = previewRect.top - boxRect.top;
+  // Absolute positioning is relative to the parent's padding box, not its border box.
+  // Subtract clientLeft/clientTop so the guide uses the same origin as the canvas.
+  const offsetX = previewRect.left - boxRect.left - thumbBox.clientLeft;
+  const offsetY = previewRect.top - boxRect.top - thumbBox.clientTop;
   if (axis === 'horizontal') {
     cutLine.style.left = (offsetX + previewRect.width * spreadPositionPercent / 100) + 'px';
     cutLine.style.top = offsetY + 'px';
@@ -836,12 +838,12 @@ const updateCutLine = () => {
     cutLine.style.height = '44px';
     cutLine.style.transform = 'translateY(-50%)';
   }
-  // 44pxのドラッグ領域の中央に、4pxの赤線を描く。
-  // border-leftを使うとドラッグ領域の左端に線が寄るため、中央配置のgradientにする。
+  // Keep the draggable hit area wide, but draw a separate 4px guide exactly at its center.
   cutLine.style.border = 'none';
-  cutLine.style.background = axis === 'horizontal'
-    ? 'linear-gradient(to right, transparent calc(50% - 2px), #f43f5e calc(50% - 2px), #f43f5e calc(50% + 2px), transparent calc(50% + 2px))'
-    : 'linear-gradient(to bottom, transparent calc(50% - 2px), #f43f5e calc(50% - 2px), #f43f5e calc(50% + 2px), transparent calc(50% + 2px))';
+  cutLine.style.background = 'transparent';
+  cutLine.innerHTML = axis === 'horizontal'
+    ? '<span aria-hidden="true" style="position:absolute;left:50%;top:0;bottom:0;width:4px;transform:translateX(-50%);background:#f43f5e;box-shadow:0 0 0 1px rgba(255,255,255,.8);pointer-events:none"></span>'
+    : '<span aria-hidden="true" style="position:absolute;top:50%;left:0;right:0;height:4px;transform:translateY(-50%);background:#f43f5e;box-shadow:0 0 0 1px rgba(255,255,255,.8);pointer-events:none"></span>';
   cutLine.style.cursor = axis === 'horizontal' ? 'ew-resize' : 'ns-resize';
   cutLine.style.touchAction = 'none';
 };
